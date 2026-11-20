@@ -1,18 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #pragma once
-#include "Sip.h"
+#include "Grip.h"
 #include <cstddef>
 #include <cstring>
 
 namespace canteen {
-struct Rotation {
-    float m[3][3];
-    Point apply(Point v) const {
-        return {m[0][0]*v.x+m[0][1]*v.y+m[0][2]*v.z,
-                m[1][0]*v.x+m[1][1]*v.y+m[1][2]*v.z,
-                m[2][0]*v.x+m[2][1]*v.y+m[2][2]*v.z};
-    }
-};
 struct Transform {
     Rotation rotation; Point position; float scale;
     Point point(Point p) const { return position + rotation.apply(p)*scale; }
@@ -50,11 +42,8 @@ struct Measurement { float distance, up; };
 inline Object *fitCanteen(Object *root) {
     auto *mesh = find(find(root,"Weapon"),"canteen:0");
     if (!mesh) return nullptr;
-    // Classic Pack's local +Z runs from the base to the cap. Map it into the
-    // weapon grip frame, and move the middle of the flask to the grip origin.
-    constexpr Rotation fit{{{0.f,.5f,-.8660254f},{0.f,.8660254f,.5f},{1.f,0.f,0.f}}};
-    mesh->local.rotation = fit;
-    mesh->local.position = fit.apply({0.f,-.3f,-5.5f});
+    mesh->local.rotation = sideGrip;
+    mesh->local.position = gripTranslation(mesh->local.scale);
     return mesh;
 }
 
@@ -73,7 +62,7 @@ inline bool measure(Measurement &out) {
     if (!mesh || !camera || !(mesh->world.scale>0.f) || !(camera->world.scale>0.f)) return false;
     // Use the last propagated transform, exactly where the game placed the mesh.
     const auto &pose=mesh->world;
-    Point cap=pose.point({0.f,.32f,13.34f});
+    Point cap=pose.point(capCenter);
     const auto &view=camera->world;
     // Camera +Y points forward, +Z up. The mouth is below and slightly ahead of the eyes.
     constexpr float units=70.f;
