@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #pragma once
-#include "Grip.h"
+#include "Fingers.h"
+#include <array>
+#include <cstdio>
 #include <cstddef>
 #include <cstring>
 #include <limits>
@@ -40,6 +42,76 @@ inline Object *find(Object *object, const char *name, unsigned depth=0) {
     return nullptr;
 }
 
+inline Object *handNode(Object *root, Hand side) {
+    return find(root, side == Hand::left ? "Bip01 L Hand" : "Bip01 R Hand");
+}
+inline void updateHand(Object *wrist) {
+    struct Update { float time; unsigned flags, unknown; } update{};
+    using Fn = void (__thiscall *)(Object *,const Update &,unsigned);
+    reinterpret_cast<Fn>(wrist->methods[0xa4/sizeof(void *)])(wrist,update,0);
+}
+struct HandPose {
+    Object *wrist{};
+    Hand side{};
+    struct Joint { char name[32]{}; Object *bone{}; Rotation saved{}, posed{}; };
+    std::array<Joint,std::size(grasp)> joints{};
+
+    void release(Object *root) {
+        if (!wrist) return;
+        if (handNode(root,side)==wrist) {
+            bool changed=false;
+            for (unsigned i=0;i<joints.size();++i) {
+                const auto &j=joints[i];
+                auto *bone=find(wrist,j.name);
+                if (bone && j.bone==bone && std::memcmp(&bone->local.rotation,&j.posed,sizeof(Rotation))==0) {
+                    bone->local.rotation=j.saved;
+                    changed=true;
+                }
+            }
+            if (changed) updateHand(wrist);
+        }
+        *this={};
+    }
+    void hold(Object *root, Hand hand) {
+        Object *current=handNode(root,hand);
+        if (current==wrist && hand==side) return;
+        release(root);
+        wrist=current;
+        side=hand;
+        if (!wrist) return;
+        for (unsigned i=0;i<joints.size();++i) {
+            auto &j=joints[i];
+            std::snprintf(j.name,sizeof(j.name),"Bip01 %c %s",hand==Hand::left ? 'L' : 'R',grasp[i].name);
+            j.posed=fingerRotation(grasp[i].angles,hand);
+        }
+    }
+    void apply() {
+        for (auto &j : joints) {
+            auto *bone=find(wrist,j.name);
+            if (!bone) { j.bone=nullptr; continue; }
+            if (bone!=j.bone || std::memcmp(&bone->local.rotation,&j.posed,sizeof(Rotation))!=0)
+                j.saved=bone->local.rotation;
+            j.bone=bone;
+            bone->local.rotation=j.posed;
+        }
+    }
+};
+struct Roots { Object *third, *first; };
+inline Roots playerRoots() {
+    auto *player=*reinterpret_cast<char **>(0x11dea3c);
+    if (!player) return {};
+    auto *loaded=*reinterpret_cast<char **>(player+0x64);
+    return {loaded ? *reinterpret_cast<Object **>(loaded+0x14) : nullptr,
+            *reinterpret_cast<Object **>(player+0x694)};
+}
+inline HandPose poses[2];
+inline void releaseGrip() {
+    if (!poses[0].wrist && !poses[1].wrist) return;
+    const auto roots=playerRoots();
+    poses[0].release(roots.third);
+    poses[1].release(roots.first);
+}
+
 struct Measurement { float distance, up; };
 struct DrawnRig {
     Object *mesh = nullptr;
@@ -68,23 +140,24 @@ inline DrawnRig drawnRig(Object *root) {
     return rig;
 }
 
-inline void place(Object *mesh, Hand hand) {
+inline void place(Object *mesh, Hand hand, bool fitted) {
     if (!mesh) return;
-    const Grip fit = sideGrip(hand, mesh->local.scale);
+    const Grip fit = sideGrip(hand, mesh->local.scale, fitted);
     mesh->local.rotation = fit.rotation;
     mesh->local.position = fit.position;
 }
 
-inline bool measure(Measurement &out) {
-    auto *player = *reinterpret_cast<char **>(0x11dea3c);
-    if (!player) return false;
-    auto *loaded = *reinterpret_cast<char **>(player+0x64);
-    DrawnRig third = drawnRig(loaded ? *reinterpret_cast<Object **>(loaded+0x14) : nullptr);
-    DrawnRig first = drawnRig(*reinterpret_cast<Object **>(player+0x694));
+inline bool measure(Measurement &out, bool fitted) {
+    const auto roots=playerRoots();
+    DrawnRig third=drawnRig(roots.third), first=drawnRig(roots.first);
     const auto &tracked = third.error <= first.error ? third : first;
     if (!std::isfinite(tracked.error)) return false;
-    place(third.mesh, tracked.hand);
-    place(first.mesh, tracked.hand);
+    place(third.mesh, tracked.hand, fitted);
+    place(first.mesh, tracked.hand, fitted);
+    if (fitted && third.mesh) poses[0].hold(roots.third,tracked.hand);
+    else poses[0].release(roots.third);
+    if (fitted && first.mesh && roots.first!=roots.third) poses[1].hold(roots.first,tracked.hand);
+    else poses[1].release(roots.first);
     auto *mesh = tracked.mesh;
     auto *scene = *reinterpret_cast<char **>(0x11dea0c);
     auto *camera = scene ? *reinterpret_cast<Object **>(scene+0xa0) : nullptr;

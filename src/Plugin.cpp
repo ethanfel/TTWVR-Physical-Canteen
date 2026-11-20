@@ -4,7 +4,7 @@
 #include <windows.h>
 #include <cstdio>
 #include <cstring>
-#include "Scene.h"
+#include "HandAnimation.h"
 
 namespace {
 struct NVSE {
@@ -85,12 +85,14 @@ void tick() {
     if (!loaded) return;
     if (!initialized) {
         initialized=true;
-        if (!GetModuleHandleW(L"TTWVR.dll")) { log("TTWVR is required"); return; }
+        auto host=GetModuleHandleW(L"TTWVR.dll");
+        if (!host) { log("TTWVR is required"); return; }
+        if (!canteen::installHandAnimation(host)) log("TTWVR hand pose callback unavailable");
         syncItems=scripts->compile(inventory);
         checkDrawn=scripts->compile(eligible);
         char value[3]{};
         trace=GetEnvironmentVariableA("TTWVR_CANTEEN_TRACE",value,sizeof(value))==1 && value[0]=='1';
-        log(syncItems && checkDrawn ? "Physical Canteen 0.1.2 ready" : "Could not compile canteen scripts");
+        log(syncItems && checkDrawn ? "Physical Canteen 0.1.3 ready" : "Could not compile canteen scripts");
     }
     if (!syncItems || !checkDrawn) return;
     if (gulp) {
@@ -104,7 +106,7 @@ void tick() {
     nextPose=now+(status==2 ? 25 : 100);
     if (status>0 && now>=nextInventory) { nextInventory=now+750; run(syncItems); }
     canteen::Measurement m{};
-    if (status!=2 || !canteen::measure(m)) { sip.reset(); return; }
+    if (status!=2 || !canteen::measure(m,canteen::restoreHostHand!=nullptr)) { canteen::releaseGrip(); sip.reset(); return; }
     if (trace) {
         static ULONGLONG nextTrace=0;
         if (now>=nextTrace) {
@@ -118,6 +120,7 @@ void __cdecl message(Message *m) {
     switch (m->type) {
         case 1: case 2: case 6: case 7: case 8: case 14:
             loaded=m->type==14 || (m->type==8 && m->data);
+            canteen::poses[0]={}; canteen::poses[1]={};
             nextInventory=nextPose=0; requested[0]=0; gulp=false; sip.reset(); break;
         case 4:
             if (requested[0] && m->data && std::strstr(static_cast<const char*>(m->data),requested)) {
@@ -130,7 +133,7 @@ void __cdecl message(Message *m) {
 }
 extern "C" __declspec(dllexport) bool NVSEPlugin_Query(const NVSE *n, Info *p) {
     if (!n || !p) return false;
-    *p={1,"TTWVR Physical Canteen",3};
+    *p={1,"TTWVR Physical Canteen",4};
     return !n->isEditor && n->runtime==0x040020d0 && n->version>=6;
 }
 extern "C" __declspec(dllexport) bool NVSEPlugin_Load(const NVSE *n) {
