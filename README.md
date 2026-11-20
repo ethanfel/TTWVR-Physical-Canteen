@@ -1,24 +1,25 @@
 # TTWVR Physical Canteen
 
-Take a drink from your Vault 13 canteen to create a manual Fallout save. A bottle gulp sounds when Fallout saves. Each drink gets a new dated **Canteen** entry in the Load menu.
+Drink from the Vault 13 canteen in VR to save your game.
 
 ## Install
 
-Requires Fallout: New Vegas with Classic Pack, TTWVR, xNVSE and JIP LN NVSE. Developed with Tale of Two Wastelands and TTWVR 1.1.7.
-
-1. Download the [release ZIP](https://github.com/ethanfel/TTWVR-Physical-Canteen/releases/latest).
-2. Install the ZIP with your mod manager, enable the mod and **TTWVRPhysicalCanteen.esp**, then restart Fallout.
-
-The mesh, icon and gulp come from your installed game. For gesture-only saves, leave the separate *Vault 13 Canteen Auto Save* mod disabled.
+Requires Fallout: New Vegas with Classic Pack, TTWVR, xNVSE and JIP LN NVSE. Install the [release ZIP](https://github.com/ethanfel/TTWVR-Physical-Canteen/releases/latest) with your mod manager, enable **TTWVRPhysicalCanteen.esp** and restart Fallout.
 
 ## Drink to save
 
-Carry the original **Vault 13 Canteen**. A weightless **Vault 13 Canteen (Drink)** appears under Weapons. Assign it to a normal TTWVR weapon holster and squeeze grip at that holster to draw it. Keep grip held while drinking. Release grip anywhere to put it away. The same slot is ready for your next draw.
+Carry the original canteen. Assign **Vault 13 Canteen (Drink)** from Weapons to a holster. Draw with either hand, hold grip and tip the canteen to your mouth. Lower it upright between sips. Release grip to holster it.
 
-Either hand can draw the canteen. On TTWVR 1.1.7, the rounded edge sits in your palm, with your fingers laid along one face and your thumb on the other. Other TTWVR builds use the standard weapon grip. Start with the cap up and away from your face. Raise its neck to your mouth, tip the base up and hold briefly for a sip. Lower it and bring it upright before drinking again. Carrying it, opening a menu and leaving it at your lips don’t trigger saves.
+## INI settings (0.1.10 test build)
 
-## Build
+Edit `Data/NVSE/Plugins/TTWVRPhysicalCanteen.ini` and restart Fallout.
 
-Run `make package` with Python 3, i686 MinGW-w64 and a native C++17 compiler. The ZIP is written to `build/`.
+```ini
+[Drinking]
+; 1 enables drunkenness and the cooldown. 0 saves on every sip.
+Enabled=1
+; Real minutes between saves and recovery time per sip.
+CooldownMinutes=5
+```
 
-[GPL-3.0-only](LICENSE)
+The first sip while sober has no penalty. Extra sips during the cooldown build drunkenness. Your next save still unlocks on time.
