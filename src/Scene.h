@@ -3,6 +3,8 @@
 #include "Grip.h"
 #include <cstddef>
 #include <cstring>
+#include <limits>
+#include <initializer_list>
 
 namespace canteen {
 struct Transform {
@@ -39,24 +41,51 @@ inline Object *find(Object *object, const char *name, unsigned depth=0) {
 }
 
 struct Measurement { float distance, up; };
-inline Object *fitCanteen(Object *root) {
-    auto *mesh = find(find(root,"Weapon"),"canteen:0");
-    if (!mesh) return nullptr;
-    mesh->local.rotation = sideGrip;
-    mesh->local.position = gripTranslation(mesh->local.scale);
-    return mesh;
+struct DrawnRig {
+    Object *mesh = nullptr;
+    Hand hand = Hand::right;
+    float error = std::numeric_limits<float>::infinity();
+};
+
+inline DrawnRig drawnRig(Object *root) {
+    DrawnRig rig;
+    auto *mount = find(root,"Weapon");
+    rig.mesh = find(mount,"canteen:0");
+    if (!rig.mesh || !(mount->world.scale > 0.f)) return rig;
+
+    // TTWVR moves the same Weapon mount to whichever controller draws. Match
+    // wrist and index knuckle to that mount, including when the hands cross.
+    for (Hand hand : {Hand::left, Hand::right}) {
+        auto *wrist = find(root, hand == Hand::left ? "Bip01 L Hand" : "Bip01 R Hand");
+        auto *index = find(wrist, hand == Hand::left ? "Bip01 L Finger1" : "Bip01 R Finger1");
+        if (!index) continue;
+        const auto &pose = mount->world;
+        float error = (squaredLength(wrist->world.position - pose.point(wristInMount(hand))) +
+                       squaredLength(index->world.position - pose.point(indexInMount(hand)))) /
+                      (pose.scale * pose.scale);
+        if (error < rig.error) { rig.hand = hand; rig.error = error; }
+    }
+    return rig;
+}
+
+inline void place(Object *mesh, Hand hand) {
+    if (!mesh) return;
+    const Grip fit = sideGrip(hand, mesh->local.scale);
+    mesh->local.rotation = fit.rotation;
+    mesh->local.position = fit.position;
 }
 
 inline bool measure(Measurement &out) {
-    // TTWVR poses both Weapon nodes together while drawn. Full Body displays the
-    // third-person instance. Resolve both afresh on the game thread after loads
-    // and weapon swaps, and only fit the named canteen under the weapon mount.
     auto *player = *reinterpret_cast<char **>(0x11dea3c);
     if (!player) return false;
     auto *loaded = *reinterpret_cast<char **>(player+0x64);
-    auto *third = loaded ? fitCanteen(*reinterpret_cast<Object **>(loaded+0x14)) : nullptr;
-    auto *first = fitCanteen(*reinterpret_cast<Object **>(player+0x694));
-    auto *mesh = first ? first : third;
+    DrawnRig third = drawnRig(loaded ? *reinterpret_cast<Object **>(loaded+0x14) : nullptr);
+    DrawnRig first = drawnRig(*reinterpret_cast<Object **>(player+0x694));
+    const auto &tracked = third.error <= first.error ? third : first;
+    if (!std::isfinite(tracked.error)) return false;
+    place(third.mesh, tracked.hand);
+    place(first.mesh, tracked.hand);
+    auto *mesh = tracked.mesh;
     auto *scene = *reinterpret_cast<char **>(0x11dea0c);
     auto *camera = scene ? *reinterpret_cast<Object **>(scene+0xa0) : nullptr;
     if (!mesh || !camera || !(mesh->world.scale>0.f) || !(camera->world.scale>0.f)) return false;

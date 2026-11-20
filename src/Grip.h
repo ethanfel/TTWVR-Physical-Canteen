@@ -12,18 +12,36 @@ struct Rotation {
     }
 };
 
-// Vault 13 mesh axes: X across the broad face, Y through it, Z from base to cap.
-// This rigid fit was measured against the drawn TTWVR right-hand skeleton.
-// The rounded edge sits between the fingertips and thumb. The neck points
-// from the little-finger end toward the index-finger end of the grip.
-inline constexpr Rotation sideGrip{{{ .857235f,  .499967f,  .123215f},
-                                   { .019594f, -.270784f,  .962441f},
-                                   { .514553f, -.822623f, -.241922f}}};
-inline constexpr Point flaskEdge{4.8f, 1.05f, 5.5f};
-inline constexpr Point handContact{-1.667f, -.1f, -1.974f};
-inline constexpr Point capCenter{0.f, 0.f, 13.34f};
+enum class Hand { left, right };
 
-inline Point gripTranslation(float scale) {
-    return handContact - sideGrip.apply(flaskEdge) * scale;
+inline float squaredLength(Point p) { return p.x*p.x + p.y*p.y + p.z*p.z; }
+
+inline Point wristInMount(Hand hand) {
+    return {-5.92f, -1.59f, hand == Hand::left ? -2.24f : 2.24f};
+}
+inline Point indexInMount(Hand hand) {
+    return {.66f, 1.96f, hand == Hand::left ? -2.28f : 2.28f};
+}
+
+// In the stock mesh +Y faces into the concavity and +Z runs from base to cap.
+// Fit the rounded edge to the hand with the broad concavity cradled from below
+// when drinking. Both hands carry an unmirrored, readable Vault 13 mesh.
+inline constexpr Point capCenter{0.f, 0.f, 13.34f};
+struct Grip { Rotation rotation; Point position; };
+inline Grip sideGrip(Hand hand, float scale) {
+    Rotation rotation{{{-.045978f, -.987376f, -.151574f},
+                       {-.302071f, -.130888f,  .944257f},
+                       {-.952176f,  .089201f, -.292239f}}};
+    Point edge{-5.049f, .8f, 4.7f};
+    Point contact{-2.448f, -.15f, -.950f};
+    if (hand == Hand::left) {
+        // TTWVR reflects the drawn hand in mount Z. Grip the opposite mesh
+        // edge as well (local X), keeping a proper rotation and positive scale.
+        for (auto &row : rotation.m) row[0] = -row[0];
+        for (auto &value : rotation.m[2]) value = -value;
+        edge.x = -edge.x;
+        contact.z = -contact.z;
+    }
+    return {rotation, contact - rotation.apply(edge)*scale};
 }
 }
