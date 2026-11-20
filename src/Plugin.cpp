@@ -92,7 +92,7 @@ void tick() {
         checkDrawn=scripts->compile(eligible);
         char value[3]{};
         trace=GetEnvironmentVariableA("TTWVR_CANTEEN_TRACE",value,sizeof(value))==1 && value[0]=='1';
-        log(syncItems && checkDrawn ? "Physical Canteen 0.1.3 ready" : "Could not compile canteen scripts");
+        log(syncItems && checkDrawn ? "Physical Canteen 0.1.4 ready" : "Could not compile canteen scripts");
     }
     if (!syncItems || !checkDrawn) return;
     if (gulp) {
@@ -133,7 +133,7 @@ void __cdecl message(Message *m) {
 }
 extern "C" __declspec(dllexport) bool NVSEPlugin_Query(const NVSE *n, Info *p) {
     if (!n || !p) return false;
-    *p={1,"TTWVR Physical Canteen",4};
+    *p={1,"TTWVR Physical Canteen",5};
     return !n->isEditor && n->runtime==0x040020d0 && n->version>=6;
 }
 extern "C" __declspec(dllexport) bool NVSEPlugin_Load(const NVSE *n) {

@@ -32,9 +32,10 @@ inline Grip sideGrip(Hand hand, float scale, bool fitted=true) {
     Rotation rotation{{{-.045978f, -.987376f, -.151574f},
                        {-.302071f, -.130888f,  .944257f},
                        {-.952176f,  .089201f, -.292239f}}};
-    // With an unknown host animation layout, retain the stock closed-hand fit.
-    Point edge = fitted ? Point{-1.949f, 2.1f, 4.7f} : Point{-5.049f, .8f, 4.7f};
-    Point contact{-2.448f, -.15f, -.950f};
+    // The fitted anchor is on the rounded rim at the heel of the palm.
+    // Use the original closed-hand placement on other animation layouts.
+    Point edge = fitted ? Point{-5.835f, 1.48f, 2.f} : Point{-5.049f, .8f, 4.7f};
+    Point contact = fitted ? Point{-0.710756f, -2.652118f, -0.553325f} : Point{-2.448f, -.15f, -.950f};
     if (hand == Hand::left) {
         // TTWVR reflects the drawn hand in mount Z. Grip the opposite mesh
         // edge as well (local X), keeping a proper rotation and positive scale.

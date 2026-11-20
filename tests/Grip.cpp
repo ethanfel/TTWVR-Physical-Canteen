@@ -23,20 +23,33 @@ static void checkContact(Hand hand) {
     const Rotation wrist{{{.991f,-.051f,-.123f},{.125f,.035f,.992f},{-.046f,-.998f,.041f}}};
     auto reflected=[hand](Point p) { return hand==Hand::left ? reflectMount(p) : p; };
     const Grip g=sideGrip(hand,1.f);
+    float lastHeight=10.f;
     for (int digit=0;digit<5;++digit) {
         Point pad=reflected(joints[digit][3]);
+        Point alongFinger{1,0,0};
         for (int j=2;j>=0;--j) {
             const auto bend=fingerRotation(grasp[digit*3+j].angles,hand);
             pad=reflected(joints[digit][j])+bend.apply(pad);
+            alongFinger=bend.apply(alongFinger);
         }
         Point mount=wristInMount(hand)+reflected(wrist.apply(reflected(pad)));
         Point offset=mount-g.position;
         const float width=dot(offset,g.rotation.apply({1,0,0}));
         const float depth=dot(offset,g.rotation.apply({0,1,0}));
         const float height=dot(offset,g.rotation.apply({0,0,1}));
-        assert(std::fabs(width)<2.f && height>1.8f && height<9.5f);
-        if (digit==4) assert(depth>1.55f && depth<2.25f);
-        else assert(depth< -1.35f && depth> -2.15f);
+        const Point direction=reflected(wrist.apply(reflected(alongFinger)));
+        const float across=dot(direction,g.rotation.apply({hand==Hand::left ? -1.f : 1.f,0,0}));
+        // The distal bone follows the broad face. A fingertip-only pinch points into it.
+        assert(across>.83f && std::fabs(dot(direction,g.rotation.apply({0,1,0})))<.38f);
+        if (digit==4) {
+            assert(depth>1.6f && depth<2.3f && height>8.f && height<10.f);
+        } else {
+            const float fromCenter=hand==Hand::left ? -width : width;
+            assert(fromCenter> -3.4f && fromCenter< -1.5f);
+            assert(depth< -1.45f && depth> -2.2f);
+            assert(height>1.6f && lastHeight-height>1.3f);
+            lastHeight=height;
+        }
     }
 }
 
@@ -62,7 +75,7 @@ int main() {
             const Point upAtLips{1,0,0}, upWhenRaised{-.09f,.996f,0};
             assert(dot(upAtLips,concave)<-.90f && dot(upAtLips,neck)<0.f);
             assert(dot(upWhenRaised,neck)>.90f);
-            Point edge{-1.949f,2.1f,4.7f}, palm{-2.448f,-.15f,-.950f};
+            Point edge{-5.835f,1.48f,2.f}, palm{-0.710756f,-2.652118f,-0.553325f};
             if (hand == Hand::left) { edge=reflectMesh(edge); palm=reflectMount(palm); }
             assert(length(placed(g,edge,scale)-palm) < .0001f);
         }

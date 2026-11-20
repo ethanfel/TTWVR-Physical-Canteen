@@ -15,7 +15,7 @@ The mesh, icon and gulp come from your installed game. For gesture-only saves, l
 
 Carry the original **Vault 13 Canteen**. A weightless **Vault 13 Canteen (Drink)** appears under Weapons. Assign it to a normal TTWVR weapon holster and squeeze grip at that holster to draw it. Keep grip held while drinking. Release grip anywhere to put it away. The same slot is ready for your next draw.
 
-Either hand can draw the canteen. On TTWVR 1.1.7, your fingers wrap around one face and your thumb rests on the other. Other TTWVR builds use the standard weapon grip. Start with the cap up and away from your face. Raise its neck to your mouth, tip the base up and hold briefly for a sip. Lower it and bring it upright before drinking again. Carrying it, opening a menu and leaving it at your lips don’t trigger saves.
+Either hand can draw the canteen. On TTWVR 1.1.7, the rounded edge sits in your palm, with your fingers laid along one face and your thumb on the other. Other TTWVR builds use the standard weapon grip. Start with the cap up and away from your face. Raise its neck to your mouth, tip the base up and hold briefly for a sip. Lower it and bring it upright before drinking again. Carrying it, opening a menu and leaving it at your lips don’t trigger saves.
 
 ## Build
 
