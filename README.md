@@ -4,13 +4,13 @@ Drink from the Vault 13 canteen in VR to save your game.
 
 ## Install
 
-Requires Fallout: New Vegas with Classic Pack, TTWVR, xNVSE and JIP LN NVSE. Install the [release ZIP](https://github.com/ethanfel/TTWVR-Physical-Canteen/releases/latest) with your mod manager, enable **TTWVRPhysicalCanteen.esp** and restart Fallout.
+Requires Fallout: New Vegas with Classic Pack, TTWVR 1.1.7, xNVSE and JIP LN NVSE. Install the [release ZIP](https://github.com/ethanfel/TTWVR-Physical-Canteen/releases/latest) with your mod manager. Give the canteen priority over TTWVR for file conflicts, enable **TTWVRPhysicalCanteen.esp** and restart Fallout.
 
 ## Drink to save
 
 Carry the original canteen. Assign **Vault 13 Canteen (Drink)** from Weapons to a holster. Draw with either hand, hold grip and tip the canteen to your mouth. Lower it upright between sips. Release grip to holster it.
 
-## INI settings (0.1.10 test build)
+## INI settings
 
 Edit `Data/NVSE/Plugins/TTWVRPhysicalCanteen.ini` and restart Fallout.
 

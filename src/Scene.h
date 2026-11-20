@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #pragma once
-#include "Fingers.h"
-#include <array>
-#include <cstdio>
+#include "Grip.h"
 #include <cstddef>
 #include <cstring>
 #include <limits>
@@ -29,7 +27,10 @@ struct Node : Object {
     Object **children;
     unsigned short capacity, end;
 };
+#if defined(_WIN32) || UINTPTR_MAX==UINT32_MAX
+static_assert(sizeof(void *)==4);
 static_assert(offsetof(Object,local)==0x34 && offsetof(Object,world)==0x68 && sizeof(Object)==0x9c);
+#endif
 
 inline Object *find(Object *object, const char *name, unsigned depth=0) {
     if (!object || depth>40) return nullptr;
@@ -42,78 +43,9 @@ inline Object *find(Object *object, const char *name, unsigned depth=0) {
     return nullptr;
 }
 
-inline Object *handNode(Object *root, Hand side) {
-    return find(root, side == Hand::left ? "Bip01 L Hand" : "Bip01 R Hand");
-}
-inline void updateHand(Object *wrist) {
-    struct Update { float time; unsigned flags, unknown; } update{};
-    using Fn = void (__thiscall *)(Object *,const Update &,unsigned);
-    reinterpret_cast<Fn>(wrist->methods[0xa4/sizeof(void *)])(wrist,update,0);
-}
-struct HandPose {
-    Object *wrist{};
-    Hand side{};
-    struct Joint { char name[32]{}; Object *bone{}; Rotation saved{}, posed{}; };
-    std::array<Joint,std::size(grasp)> joints{};
-
-    void release(Object *root) {
-        if (!wrist) return;
-        if (handNode(root,side)==wrist) {
-            bool changed=false;
-            for (unsigned i=0;i<joints.size();++i) {
-                const auto &j=joints[i];
-                auto *bone=find(wrist,j.name);
-                if (bone && j.bone==bone && std::memcmp(&bone->local.rotation,&j.posed,sizeof(Rotation))==0) {
-                    bone->local.rotation=j.saved;
-                    changed=true;
-                }
-            }
-            if (changed) updateHand(wrist);
-        }
-        *this={};
-    }
-    void hold(Object *root, Hand hand) {
-        Object *current=handNode(root,hand);
-        if (current==wrist && hand==side) return;
-        release(root);
-        wrist=current;
-        side=hand;
-        if (!wrist) return;
-        for (unsigned i=0;i<joints.size();++i) {
-            auto &j=joints[i];
-            std::snprintf(j.name,sizeof(j.name),"Bip01 %c %s",hand==Hand::left ? 'L' : 'R',grasp[i].name);
-            j.posed=fingerRotation(grasp[i].angles,hand);
-        }
-    }
-    void apply() {
-        for (auto &j : joints) {
-            auto *bone=find(wrist,j.name);
-            if (!bone) { j.bone=nullptr; continue; }
-            if (bone!=j.bone || std::memcmp(&bone->local.rotation,&j.posed,sizeof(Rotation))!=0)
-                j.saved=bone->local.rotation;
-            j.bone=bone;
-            bone->local.rotation=j.posed;
-        }
-    }
-};
-struct Roots { Object *third, *first; };
-inline Roots playerRoots() {
-    auto *player=*reinterpret_cast<char **>(0x11dea3c);
-    if (!player) return {};
-    auto *loaded=*reinterpret_cast<char **>(player+0x64);
-    return {loaded ? *reinterpret_cast<Object **>(loaded+0x14) : nullptr,
-            *reinterpret_cast<Object **>(player+0x694)};
-}
-inline HandPose poses[2];
-inline void releaseGrip() {
-    if (!poses[0].wrist && !poses[1].wrist) return;
-    const auto roots=playerRoots();
-    poses[0].release(roots.third);
-    poses[1].release(roots.first);
-}
-
-struct Measurement { float distance, up; };
+struct Measurement { float distance, up; Hand hand; Object *root; };
 struct DrawnRig {
+    Object *root = nullptr;
     Object *mesh = nullptr;
     Hand hand = Hand::right;
     float error = std::numeric_limits<float>::infinity();
@@ -121,6 +53,7 @@ struct DrawnRig {
 
 inline DrawnRig drawnRig(Object *root) {
     DrawnRig rig;
+    rig.root=root;
     auto *mount = find(root,"Weapon");
     rig.mesh = find(mount,"canteen:0");
     if (!rig.mesh || !(mount->world.scale > 0.f)) return rig;
@@ -140,24 +73,72 @@ inline DrawnRig drawnRig(Object *root) {
     return rig;
 }
 
-inline void place(Object *mesh, Hand hand, bool fitted) {
-    if (!mesh) return;
-    const Grip fit = sideGrip(hand, mesh->local.scale, fitted);
+// Same leaf update used by JIP LN after changing a NIF block transform.
+// Controllers stay off. Gamebryo propagates the mesh transform and bounds.
+struct UpdateData {
+    float timePassed{};
+    unsigned char options[8]{};
+};
+static_assert(sizeof(UpdateData)==12);
+inline void place(Object *mesh, Hand hand) {
+    if (!mesh || !(mesh->local.scale>0.f)) return;
+    const Grip fit = sideGrip(hand, mesh->local.scale);
+    if (!std::memcmp(&fit.rotation,&mesh->local.rotation,sizeof(Rotation)) &&
+        !std::memcmp(&fit.position,&mesh->local.position,sizeof(Point))) return;
     mesh->local.rotation = fit.rotation;
     mesh->local.position = fit.position;
+    using Update = void (__thiscall *)(Object *,const UpdateData &,unsigned);
+    static const UpdateData update{};
+    reinterpret_cast<Update>(mesh->methods[0xA4/4])(mesh,update,0);
 }
 
-inline bool measure(Measurement &out, bool fitted) {
-    const auto roots=playerRoots();
-    DrawnRig third=drawnRig(roots.third), first=drawnRig(roots.first);
+inline Object *worldRoot(char *player) {
+    auto *loaded=player ? *reinterpret_cast<char **>(player+0x64) : nullptr;
+    return loaded ? *reinterpret_cast<Object **>(loaded+0x14) : nullptr;
+}
+
+inline DrawnRig fitRoots(Object *thirdRoot, Object *firstRoot, bool beforeDraw) {
+    DrawnRig third=drawnRig(thirdRoot);
+    DrawnRig first=firstRoot==thirdRoot ? third : drawnRig(firstRoot);
     const auto &tracked = third.error <= first.error ? third : first;
-    if (!std::isfinite(tracked.error)) return false;
-    place(third.mesh, tracked.hand, fitted);
-    place(first.mesh, tracked.hand, fitted);
-    if (fitted && third.mesh) poses[0].hold(roots.third,tracked.hand);
-    else poses[0].release(roots.third);
-    if (fitted && first.mesh && roots.first!=roots.third) poses[1].hold(roots.first,tracked.hand);
-    else poses[1].release(roots.first);
+    // During an equip the Weapon mount can still be on the body. The score
+    // sums the squared wrist and knuckle errors in unscaled game units.
+    if (!std::isfinite(tracked.error) || (beforeDraw && tracked.error>4.f)) return {};
+    place(third.mesh,tracked.hand);
+    if (first.mesh!=third.mesh) place(first.mesh,tracked.hand);
+    return tracked;
+}
+
+inline Object *firstPersonRoot(char *player) {
+    return *reinterpret_cast<Object **>(player+0x694);
+}
+
+// During equip the actor process and the two biped slots need not update on
+// the same frame. Look for this exact form before searching the player's 3D.
+inline bool hasCanteen(char *player, const void *form) {
+    if (!player || !form) return false;
+    for (unsigned offset : {0x1B4u, 0x68Cu}) {
+        auto *biped=*reinterpret_cast<char **>(player+offset);
+        // BipedAnim::slotData[5].item, FalloutNV 1.4.0.525.
+        if (biped && *reinterpret_cast<void **>(biped+0x2C+5*0x10)==form) return true;
+    }
+    // Actor::GetEquippedWeapon on FalloutNV 1.4.0.525.
+    auto *process=*reinterpret_cast<char **>(player+0x68);
+    if (!process || static_cast<unsigned char>(process[0x28])>1) return false;
+    auto *entry=*reinterpret_cast<char **>(process+0x114);
+    return entry && *reinterpret_cast<void **>(entry+8)==form;
+}
+
+inline bool prepareDraw(const void *form) {
+    auto *player=*reinterpret_cast<char **>(0x11dea3c);
+    if (!hasCanteen(player,form)) return false;
+    return fitRoots(worldRoot(player),firstPersonRoot(player),true).mesh!=nullptr;
+}
+
+inline bool measure(Measurement &out) {
+    auto *player=*reinterpret_cast<char **>(0x11dea3c);
+    if (!player) return false;
+    DrawnRig tracked=fitRoots(worldRoot(player),firstPersonRoot(player),false);
     auto *mesh = tracked.mesh;
     auto *scene = *reinterpret_cast<char **>(0x11dea0c);
     auto *camera = scene ? *reinterpret_cast<Object **>(scene+0xa0) : nullptr;
@@ -169,7 +150,7 @@ inline bool measure(Measurement &out, bool fitted) {
     // Camera +Y points forward, +Z up. The mouth is below and slightly ahead of the eyes.
     constexpr float units=70.f;
     Point mouth=view.position+view.rotation.apply({0.f,.048f*units,-.091f*units});
-    out={length(cap-mouth)/units,pose.rotation.m[2][2]};
+    out={length(cap-mouth)/units,pose.rotation.m[2][2],tracked.hand,tracked.root};
     return std::isfinite(out.distance) && std::isfinite(out.up);
 }
 }

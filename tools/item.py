@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-only
-"""Write two new FNV records pointing to the player's installed Classic Pack mesh."""
+"""Build the physical canteen and its temporary beer-style abilities."""
 from pathlib import Path
 from struct import pack, pack_into
 
@@ -23,7 +23,7 @@ def group(tag, data):
 
 def build():
     header = record(b"TES4", 0, [
-        (b"HEDR", pack("<fII", 1.34, 4, 0x802)), (b"CNAM", string("TTWVR Physical Canteen")),
+        (b"HEDR", pack("<fII", 1.34, 8, 0x805)), (b"CNAM", string("TTWVR Physical Canteen")),
         (b"MAST", string("FalloutNV.esm")), (b"DATA", bytes(8)),
     ])
     bounds = pack("<6h", -7, -2, 0, 7, 3, 14)
@@ -46,7 +46,19 @@ def build():
         (b"WNAM", pack("<I", FIRST_PERSON)), (b"DATA", pack("<IIfHB", 0, 100, 0.0, 0, 0)),
         (b"DNAM", tuning), (b"CRDT", bytes(16)), (b"VNAM", pack("<I", 2)),
     ], flags=0x400)  # Quest item: the zero-weight representation stays with the original.
-    return header + group(b"STAT", model) + group(b"WEAP", tool)
+    # Use the three SPECIAL effects from FalloutNV.esm's Beer (00015197).
+    # Ability duration is controlled by the canteen's recovery timer.
+    abilities = []
+    for level, label in enumerate(("Tipsy", "Drunk", "Very Drunk"), start=1):
+        fields = [(b"EDID", string(f"TTWVRCanteenBuzz{level}")),
+                  (b"FULL", string(f"Canteen - {label}")),
+                  (b"SPIT", pack("<4I", 4, 0, 0, 0))]
+        for effect, magnitude, actor_value in (
+                (0x66989, level, 9), (0x66988, 1, 5), (0x66EB2, 1, 8)):
+            fields.extend(((b"EFID", pack("<I", effect)),
+                           (b"EFIT", pack("<5I", magnitude, 0, 0, 0, actor_value))))
+        abilities.append(record(b"SPEL", FIRST_PERSON + level, fields))
+    return header + group(b"SPEL", b"".join(abilities)) + group(b"STAT", model) + group(b"WEAP", tool)
 
 
 if __name__ == "__main__":

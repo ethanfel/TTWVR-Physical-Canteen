@@ -24,18 +24,18 @@ inline Point indexInMount(Hand hand) {
 }
 
 // In the stock mesh +Y faces into the concavity and +Z runs from base to cap.
-// Seat the body between the thumb and finger pads with the concavity supported
+// Fit the rounded edge to the hand with the broad concavity cradled from below
 // when drinking. Both hands carry an unmirrored, readable Vault 13 mesh.
 inline constexpr Point capCenter{0.f, 0.f, 13.34f};
 struct Grip { Rotation rotation; Point position; };
-inline Grip sideGrip(Hand hand, float scale, bool fitted=true) {
-    Rotation rotation{{{-.045978f, -.987376f, -.151574f},
-                       {-.302071f, -.130888f,  .944257f},
-                       {-.952176f,  .089201f, -.292239f}}};
-    // The fitted anchor is on the rounded rim at the heel of the palm.
-    // Use the original closed-hand placement on other animation layouts.
-    Point edge = fitted ? Point{-5.835f, 1.48f, 2.f} : Point{-5.049f, .8f, 4.7f};
-    Point contact = fitted ? Point{-0.710756f, -2.652118f, -0.553325f} : Point{-2.448f, -.15f, -.950f};
+inline Grip sideGrip(Hand hand, float scale) {
+    // Recorded receiving-hand grip, with the flask tilted 4.75 degrees about
+    // its edge and the edge shifted 0.244 game units to clear the thumb and pinky.
+    Rotation rotation{{{.42820625f, -.90154772f, -.06206066f},
+                       {.16347431f,  .00973619f,  .98649955f},
+                       {-.88877197f, -.43257006f, .15154883f}}};
+    Point edge{-5.835f, 1.48f, 4.7f};
+    Point contact{1.893276f, .573977f, .201163f};
     if (hand == Hand::left) {
         // TTWVR reflects the drawn hand in mount Z. Grip the opposite mesh
         // edge as well (local X), keeping a proper rotation and positive scale.
