@@ -20,6 +20,8 @@ Edit `Data/NVSE/Plugins/TTWVRPhysicalCanteen.ini` and restart Fallout.
 Enabled=1
 ; Real minutes between saves and recovery time per sip.
 CooldownMinutes=5
+; 1 adds sway to the headset view. 0 keeps the horizon level.
+ViewSway=1
 ```
 
-The first sip while sober has no penalty. Extra sips gradually blur your vision and make gun sights drift. At stronger levels your avatar sways at the waist. The headset view follows your head throughout. Your next save still unlocks on time.
+The first sip while sober has no penalty. Extra sips gradually blur your vision, make gun sights drift, and rock the horizon from side to side. At stronger levels your avatar also sways at the waist. Your next save still unlocks on time.

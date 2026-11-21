@@ -9,9 +9,12 @@
 namespace canteen {
 // The same 1.1.7 controller-frame layout and verification used by the Night Vision addon.
 static std::atomic<unsigned> motion{0};
-void publishMotion(float amount,bool firearm) {
+static std::atomic<unsigned> viewApplied{0};
+unsigned appliedViewBackends() { return viewApplied.load(std::memory_order_relaxed); }
+void publishMotion(float amount,bool firearm,bool viewSway) {
     const unsigned amplitude=static_cast<unsigned>(std::lround(amount*4096));
-    motion.store(amplitude ? amplitude | (firearm ? 8192u : 0u) : 0u,std::memory_order_relaxed);
+    motion.store(amplitude ? amplitude | (firearm ? 8192u : 0u) | (viewSway ? 16384u : 0u) : 0u,
+                 std::memory_order_relaxed);
 }
 
 using Poll = bool (__thiscall *)(void *,TrackingFrame *);
@@ -20,7 +23,15 @@ template<int Backend> struct Filter {
     static bool __fastcall poll(void *self,void *,TrackingFrame *f) {
         bool ok=previous(self,f);
         unsigned state=motion.load(std::memory_order_relaxed);
-        if (ok && f && state) driftHands(*f,rocking(GetTickCount64()*.001,(state&8191)/4096.f),state&8192);
+        if (ok && f && state) {
+            const Rock rock=rocking(GetTickCount64()*.001,(state&8191)/4096.f);
+            driftHands(*f,rock,state&8192);
+            if ((state&16384) && swayView(*f,rock.viewRoll) && std::abs(rock.viewRoll)>.004f) {
+                constexpr unsigned backendBit=1u<<Backend;
+                if (!(viewApplied.load(std::memory_order_relaxed)&backendBit))
+                    viewApplied.fetch_or(backendBit,std::memory_order_relaxed);
+            }
+        }
         return ok;
     }
     static bool install(BYTE *host,unsigned table) {

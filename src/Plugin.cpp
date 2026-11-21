@@ -11,7 +11,8 @@
 
 namespace canteen {
 unsigned installDrift();
-void publishMotion(float amount,bool firearm);
+void publishMotion(float amount,bool firearm,bool viewSway);
+unsigned appliedViewBackends();
 }
 
 namespace {
@@ -53,7 +54,7 @@ bool legacyClean=false, presentedLean=false, driftTried=false;
 float targetStrength=0, shownStrength=0;
 int lastBlur=-1, playMode=0;
 ULONGLONG lastMotion=0, nextMode=0, lastPresentation=0, nextBlur=0;
-bool drinkingEnabled=true, timingLoaded=false;
+bool drinkingEnabled=true, viewSway=true, timingLoaded=false;
 int drinkInterval=canteen::defaultDrinkInterval;
 ULONGLONG nextDrinkUpdate=0;
 canteen::DrinkTiming timing;
@@ -191,6 +192,7 @@ void initDrinking() {
                                         MAX_PATH,path,nullptr);
     if (length && length<MAX_PATH) {
         drinkingEnabled=GetPrivateProfileIntA("Drinking","Enabled",1,path)!=0;
+        viewSway=GetPrivateProfileIntA("Drinking","ViewSway",1,path)!=0;
         char minutes[64]{};
         GetPrivateProfileStringA("Drinking","CooldownMinutes","5",minutes,sizeof(minutes),path);
         drinkInterval=canteen::intervalSeconds(minutes);
@@ -207,8 +209,8 @@ void initDrinking() {
         return;
     }
     char line[100];
-    std::snprintf(line,sizeof(line),"canteen_drinking enabled=%d interval_seconds=%d",
-                  int(drinkingEnabled),drinkInterval);
+    std::snprintf(line,sizeof(line),"canteen_drinking enabled=%d interval_seconds=%d view_sway=%d",
+                  int(drinkingEnabled),drinkInterval,int(viewSway));
     log(line);
 }
 
@@ -273,7 +275,14 @@ void updateMotion(ULONGLONG now) {
     }
     if (shownStrength==0) playMode=0;
     float playing=playMode>0 ? shownStrength : 0.f;
-    canteen::publishMotion(playing,playMode==2);
+    canteen::publishMotion(playing,playMode==2,viewSway);
+    static unsigned reportedViews=0;
+    const unsigned applied=canteen::appliedViewBackends();
+    if (applied!=reportedViews) {
+        if ((applied&1) && !(reportedViews&1)) log("view_sway backend=OpenXR eyes=2 applied=1");
+        if ((applied&2) && !(reportedViews&2)) log("view_sway backend=OpenVR eyes=2 applied=1");
+        reportedViews=applied;
+    }
     int amount=static_cast<int>(std::lround(64.f*playing));
     if (amount!=lastBlur && now>=nextBlur) {
         applyBlur(amount);
@@ -371,7 +380,7 @@ void tick() {
         initDrinking();
         char value[3]{};
         trace=GetEnvironmentVariableA("TTWVR_CANTEEN_TRACE",value,sizeof(value))==1 && value[0]=='1';
-        log(syncItems && checkDrawn && putAway ? "Physical Canteen 0.1.11 ready" : "Could not compile canteen scripts");
+        log(syncItems && checkDrawn && putAway ? "Physical Canteen 0.1.12 ready" : "Could not compile canteen scripts");
     }
     if (!syncItems || !checkDrawn || !putAway) return;
     if (gulp) {
@@ -452,7 +461,7 @@ void __cdecl message(Message *m) {
                 playMode=0;
                 if (presentedLean) presentBody(GetTickCount64());
             }
-            canteen::publishMotion(0,false);
+            canteen::publishMotion(0,false,false);
             targetStrength=shownStrength=0; lastBlur=-1; playMode=0; legacyClean=presentedLean=false;
             lastMotion=nextMode=lastPresentation=nextBlur=0;
             loaded=m->type==14 || (m->type==8 && m->data);
@@ -474,7 +483,7 @@ void __cdecl message(Message *m) {
 }
 extern "C" __declspec(dllexport) bool NVSEPlugin_Query(const NVSE *n, Info *p) {
     if (!n || !p) return false;
-    *p={1,"TTWVR Physical Canteen",12};
+    *p={1,"TTWVR Physical Canteen",13};
     return !n->isEditor && n->runtime==0x040020d0 && n->version>=6;
 }
 extern "C" __declspec(dllexport) bool NVSEPlugin_Load(const NVSE *n) {

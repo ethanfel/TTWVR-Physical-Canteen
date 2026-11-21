@@ -66,7 +66,55 @@ static void testSpine() {
     for (int i=0;i<count;++i) samePose(rest[i].local,rig[i].local);
 }
 
+static void testViewSway() {
+    TrackingFrame raw{};
+    raw.valid=1;
+    raw.head={{.4f,1.65f,-.7f},product(turn({0,1,0},1.3f),turn({1,0,0},-.4f)),1,0,{}};
+    for (int eye=0;eye<2;++eye) {
+        const float side=eye ? 1.f : -1.f;
+        auto &v=raw.eyes[eye];
+        v.pose=raw.head;
+        v.pose.position=v.pose.position+rotate(raw.head.orientation,{side*.032f,.004f,-.01f});
+        v.pose.orientation=product(raw.head.orientation,turn({0,1,0},side*.06f));
+        v.fov[0]=-.9f+side*.1f;
+    }
+    auto invalid=raw;
+    invalid.eyes[1].pose.valid=0;
+    auto unchanged=invalid;
+    assert(!swayView(invalid,.05f) && !std::memcmp(&invalid,&unchanged,sizeof(raw)));
+    auto sober=raw;
+    assert(!swayView(sober,rocking(1,0).viewRoll) && !std::memcmp(&raw,&sober,sizeof(raw)));
+
+    float maximum[3]{};
+    for (int level=1;level<=3;++level) for (int tick=0;tick<900;++tick) {
+        auto sample=raw; // Each poll starts with fresh physical tracking, including with hands offline.
+        const float angle=rocking(tick/90.,level/3.f).viewRoll;
+        maximum[level-1]=std::max(maximum[level-1],std::abs(angle));
+        assert(swayView(sample,angle));
+        Quaternion localRoll=turn({0,0,-1},angle);
+        Quaternion expected=product(raw.head.orientation,localRoll);
+        assert(near(rotate(sample.head.orientation,{0,1,0}),rotate(expected,{0,1,0})));
+        for (int eye=0;eye<2;++eye) {
+            auto toHead=[](const TrackedPose &head,Point world) {
+                Quaternion inverse{-head.orientation.x,-head.orientation.y,-head.orientation.z,head.orientation.w};
+                return rotate(inverse,world);
+            };
+            const auto &v=sample.eyes[eye].pose, &before=raw.eyes[eye].pose;
+            assert(near(toHead(sample.head,v.position-sample.head.position),
+                        toHead(raw.head,before.position-raw.head.position)));
+            assert(near(toHead(sample.head,rotate(v.orientation,{0,0,-1})),
+                        toHead(raw.head,rotate(before.orientation,{0,0,-1}))));
+            assert(!std::memcmp(sample.eyes[eye].fov,raw.eyes[eye].fov,sizeof(sample.eyes[eye].fov)));
+        }
+        assert(!std::memcmp(sample.hands,raw.hands,sizeof(raw.hands)));
+        assert(!std::memcmp(sample.sticks,raw.sticks,sizeof(raw)-offsetof(TrackingFrame,sticks)));
+    }
+    assert(maximum[0]>.008f && maximum[0]<maximum[1] && maximum[1]<maximum[2]);
+    assert(maximum[2]>.045f && maximum[2]<=.05236f);
+}
+
 int main() {
+    testViewSway();
     TrackingFrame sample{};
     sample.valid=1;
     sample.head={{0,1.7f,0},{},1,0,{}};

@@ -33,14 +33,16 @@ inline Quaternion between(Point a,Point b) {
     const float n=std::sqrt(dot(v,v)+(1+c)*(1+c));
     return {v.x/n,v.y/n,v.z/n,(1+c)/n};
 }
-struct Rock { float yaw,pitch,lean; };
+struct Rock { float yaw,pitch,lean,viewRoll; };
 inline Rock rocking(double seconds,float strength) {
     // Lean starts above the first extra sip and grows smoothly alongside aim drift.
     float u=std::clamp((strength-.35f)/.65f,0.f,1.f);
     float balance=u*u*(3.f-2.f*u);
+    float wave=static_cast<float>(.8*std::sin(seconds*.89)+.2*std::sin(seconds*1.31+.6));
+    constexpr float maxViewRoll=3.f*3.14159265f/180.f;
     return {float(.030*strength*(.72*std::sin(seconds*1.43)+.28*std::sin(seconds*.81))),
             float(.018*strength*std::sin(seconds*1.09+.8)),
-            float(.046*balance*(.8*std::sin(seconds*.89)+.2*std::sin(seconds*1.31+.6)))};
+            .046f*balance*wave, maxViewRoll*strength*(.4f+.6f*strength)*wave};
 }
 
 struct TrackedPose { Point position; Quaternion orientation; unsigned char valid,tracked,pad[2]; };
@@ -57,6 +59,21 @@ inline bool validPose(const TrackedPose &p) {
     const auto &q=p.orientation;
     return p.valid && std::isfinite(dot(p.position,p.position)) &&
            std::abs(q.x*q.x+q.y*q.y+q.z*q.z+q.w*q.w-1.f)<.05f;
+}
+// TTWVR builds its game cameras from this copy of the backend's tracking sample.
+// Use one rigid motion about the neck for the center and both eyes, including
+// their separation and any canted eye orientations. The runtime owns its raw poses.
+inline bool swayView(TrackingFrame &frame,float roll) {
+    if (roll==0.f || !frame.valid || !validPose(frame.head) ||
+        !validPose(frame.eyes[0].pose) || !validPose(frame.eyes[1].pose)) return false;
+    const auto &head=frame.head;
+    const Point pivot=head.position+rotate(head.orientation,{0,-.18f,0});
+    const Quaternion tilt=turn(unit(rotate(head.orientation,{0,0,-1})),roll);
+    for (auto *p:{&frame.head,&frame.eyes[0].pose,&frame.eyes[1].pose}) {
+        p->position=pivot+rotate(tilt,p->position-pivot);
+        p->orientation=product(tilt,p->orientation);
+    }
+    return true;
 }
 inline void driftHands(TrackingFrame &frame,Rock r,bool firearm) {
     if (!frame.valid || !validPose(frame.head)) return;
