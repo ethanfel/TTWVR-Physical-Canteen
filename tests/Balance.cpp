@@ -86,7 +86,7 @@ static void testViewSway() {
     assert(!swayView(sober,rocking(1,0).viewRoll) && !std::memcmp(&raw,&sober,sizeof(raw)));
 
     float maximum[3]{};
-    for (int level=1;level<=3;++level) for (int tick=0;tick<900;++tick) {
+    for (int level=1;level<=3;++level) for (int tick=0;tick<90*60;++tick) {
         auto sample=raw; // Each poll starts with fresh physical tracking, including with hands offline.
         const float angle=rocking(tick/90.,level/3.f).viewRoll;
         maximum[level-1]=std::max(maximum[level-1],std::abs(angle));
@@ -109,8 +109,11 @@ static void testViewSway() {
         assert(!std::memcmp(sample.hands,raw.hands,sizeof(raw.hands)));
         assert(!std::memcmp(sample.sticks,raw.sticks,sizeof(raw)-offsetof(TrackingFrame,sticks)));
     }
-    assert(maximum[0]>.008f && maximum[0]<maximum[1] && maximum[1]<maximum[2]);
-    assert(maximum[2]>.045f && maximum[2]<=.05236f);
+    const float peakDegrees[]{10.f/9.f,40.f/9.f,10.f};
+    for (int i=0;i<3;++i) {
+        float degrees=maximum[i]*180.f/3.14159265f;
+        assert(degrees>peakDegrees[i]*.98f && degrees<=peakDegrees[i]+.0001f);
+    }
 }
 
 int main() {

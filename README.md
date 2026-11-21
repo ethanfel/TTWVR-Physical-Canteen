@@ -22,6 +22,8 @@ Enabled=1
 CooldownMinutes=5
 ; 1 adds sway to the headset view. 0 keeps the horizon level.
 ViewSway=1
+; 1 adds double vision at levels 2 and 3. The images briefly draw closer at irregular intervals. Set to 0 to disable.
+DoubleVision=1
 ```
 
 The first sip while sober has no penalty. Extra sips gradually blur your vision, make gun sights drift, and rock the horizon from side to side. At stronger levels your avatar also sways at the waist. Your next save still unlocks on time.

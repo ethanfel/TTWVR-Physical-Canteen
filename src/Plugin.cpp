@@ -49,12 +49,21 @@ ULONGLONG wristAfter = 0;
 bool loaded=false, initialized=false, trace=false, gulp=false;
 ULONGLONG nextInventory=0, nextPose=0, requestedAt=0;
 char requested[96]{};
-void *getDeadline, *putDeadlines, *clearOldAbilities, *setBlur, *motionMode;
+void *getDeadline, *putDeadlines, *clearOldAbilities, *setImageEffect, *motionMode;
+void *readAlcohol, *clearPreviousImages;
+bool hasCanteen=false, hasAlcohol=false, imagesClean=false;
 bool legacyClean=false, presentedLean=false, driftTried=false;
-float targetStrength=0, shownStrength=0;
-int lastBlur=-1, playMode=0;
-ULONGLONG lastMotion=0, nextMode=0, lastPresentation=0, nextBlur=0;
-bool drinkingEnabled=true, viewSway=true, timingLoaded=false;
+float targetStrength=0, alcoholStrength=0, shownStrength=0;
+enum class ImageEffect : int { blur, doubleVision };
+struct ModifierState {
+    ImageEffect effect;
+    int lastWeight=-1;
+    ULONGLONG nextUpdate=0;
+};
+ModifierState blur{ImageEffect::blur}, ghost{ImageEffect::doubleVision};
+int playMode=0;
+ULONGLONG lastMotion=0, nextMode=0, lastPresentation=0;
+bool drinkingEnabled=true, viewSway=true, doubleVision=true, timingLoaded=false;
 int drinkInterval=canteen::defaultDrinkInterval;
 ULONGLONG nextDrinkUpdate=0;
 canteen::DrinkTiming timing;
@@ -72,6 +81,33 @@ int run(void *script) {
     Result result;
     return scripts->call(script,nullptr,nullptr,&result,0) && result.type==1 ? int(result.value) : -1;
 }
+constexpr char enabledAddons[] = R"(begin Function {}
+ int flags
+ if IsModLoaded "TTWVRPhysicalCanteen.esp"
+  let flags := 1
+ endif
+ if IsModLoaded "TTWVRAlcohol.esp"
+  let flags += 2
+ endif
+ SetFunctionValue flags
+end)";
+constexpr char alcoholLevel[] = R"(begin Function {}
+ float soberDay
+ let soberDay := player.AuxVarGetFlt "_TTWVRAlcoholSoberDay" 0
+ SetFunctionValue ((soberDay - GameDaysPassed) * 4.0)
+end)";
+constexpr char removePreviousImages[] = R"(begin Function {}
+ ref modifier
+ let modifier := GetFormFromMod "TTWVRPhysicalCanteen.esp" "805"
+ if eval modifier
+  RemoveImageSpaceModifier modifier
+ endif
+ let modifier := GetFormFromMod "TTWVRPhysicalCanteen.esp" "806"
+ if eval modifier
+  RemoveImageSpaceModifier modifier
+ endif
+ SetFunctionValue 1
+end)";
 constexpr char inventory[] = R"(begin Function {}
  ref tool
  int copies
@@ -118,7 +154,7 @@ constexpr char release[] = R"(begin Function {}
  endif
 end)";
 
-// JIP stores the two public player auxiliary values in the NVSE co-save.
+// JIP stores both deadlines and the clock at save time in the NVSE co-save.
 // Absolute deadlines also expire while Fallout is closed.
 constexpr char readDeadline[] = R"(int slot
 begin Function {slot}
@@ -126,11 +162,15 @@ begin Function {slot}
 end)";
 constexpr char writeDeadlines[] = R"(int readyAt
 int soberAt
+int observedAt
 int ok
-begin Function {readyAt soberAt}
+begin Function {readyAt soberAt observedAt}
  let ok := player.AuxVarSetFlt "_TTWVRPhysicalCanteenDeadlines" readyAt 0
  if ok
-  SetFunctionValue (player.AuxVarSetFlt "_TTWVRPhysicalCanteenDeadlines" soberAt 1)
+  let ok := player.AuxVarSetFlt "_TTWVRPhysicalCanteenDeadlines" soberAt 1
+  if ok
+   SetFunctionValue (player.AuxVarSetFlt "_TTWVRPhysicalCanteenDeadlines" observedAt 2)
+  endif
  endif
 end)";
 // 0.1.10 serialized its active abilities into the base save. Remove only our
@@ -151,18 +191,33 @@ constexpr char removeBeer[] = R"(begin Function {}
  endif
  SetFunctionValue 1
 end)";
-constexpr char blurScript[] = R"(int amount
+constexpr char imageEffectScript[] = R"(int amount
+int doubleImage
+int wasActive
 ref modifier
 float weight
-begin Function {amount}
- let modifier := GetFormFromMod "TTWVRPhysicalCanteen.esp" "805"
+begin Function {amount doubleImage wasActive}
+ if doubleImage
+  let modifier := GetFormFromMod "%s" "806"
+ else
+  let modifier := GetFormFromMod "%s" "805"
+ endif
  if eval !modifier
   return
  endif
- RemoveImageSpaceModifier modifier
- if amount > 0
-  let weight := amount / 64.0
-  ApplyImageSpaceModifier modifier weight
+ if eval doubleImage && amount > 0
+  let weight := amount / 10000.0
+  SetImageSpaceModTrait modifier 46 weight
+  if wasActive == 0
+   RemoveImageSpaceModifier modifier
+   ApplyImageSpaceModifier modifier 1.0
+  endif
+ else
+  RemoveImageSpaceModifier modifier
+  if amount > 0
+   let weight := amount / 64.0
+   ApplyImageSpaceModifier modifier weight
+  endif
  endif
  SetFunctionValue 1
 end)";
@@ -193,24 +248,34 @@ void initDrinking() {
     if (length && length<MAX_PATH) {
         drinkingEnabled=GetPrivateProfileIntA("Drinking","Enabled",1,path)!=0;
         viewSway=GetPrivateProfileIntA("Drinking","ViewSway",1,path)!=0;
+        doubleVision=GetPrivateProfileIntA("Drinking","DoubleVision",1,path)!=0;
         char minutes[64]{};
         GetPrivateProfileStringA("Drinking","CooldownMinutes","5",minutes,sizeof(minutes),path);
         drinkInterval=canteen::intervalSeconds(minutes);
     }
+    const char *effectPlugin=hasAlcohol ? "TTWVRAlcohol.esp" : "TTWVRPhysicalCanteen.esp";
+    char effectSource[sizeof(imageEffectScript)+64];
+    std::snprintf(effectSource,sizeof(effectSource),imageEffectScript,effectPlugin,effectPlugin);
+    setImageEffect=scripts->compile(effectSource);
+    motionMode=scripts->compile(checkMotionMode);
+    if (hasAlcohol) {
+        readAlcohol=scripts->compile(alcoholLevel);
+        log(readAlcohol && setImageEffect && motionMode ? "regular_alcohol ready" : "Could not compile regular alcohol effects");
+        if (hasCanteen) clearPreviousImages=scripts->compile(removePreviousImages);
+    }
+    if (!hasCanteen) return;
     getDeadline=scripts->compile(readDeadline);
     putDeadlines=scripts->compile(writeDeadlines);
     clearOldAbilities=scripts->compile(removeBeer);
-    setBlur=scripts->compile(blurScript);
-    motionMode=scripts->compile(checkMotionMode);
-    if (!clearOldAbilities || !setBlur || !motionMode) log("Could not compile all canteen effect scripts");
+    if (!clearOldAbilities || !setImageEffect || !motionMode) log("Could not compile all canteen effect scripts");
     if (!getDeadline || !putDeadlines) {
         drinkingEnabled=false;
         log("Could not compile drinking scripts; using ordinary canteen saves");
         return;
     }
     char line[100];
-    std::snprintf(line,sizeof(line),"canteen_drinking enabled=%d interval_seconds=%d view_sway=%d",
-                  int(drinkingEnabled),drinkInterval,int(viewSway));
+    std::snprintf(line,sizeof(line),"canteen_drinking enabled=%d interval_seconds=%d view_sway=%d double_vision=%d",
+                  int(drinkingEnabled),drinkInterval,int(viewSway),int(doubleVision));
     log(line);
 }
 
@@ -228,41 +293,62 @@ int drinkClock() {
 
 void storeTiming() {
     Result result;
-    if (!scripts->call(putDeadlines,nullptr,nullptr,&result,2,timing.saveReady,timing.soberAt) ||
+    if (!scripts->call(putDeadlines,nullptr,nullptr,&result,3,timing.saveReady,timing.soberAt,timing.observedAt) ||
         result.type!=1 || result.value!=1) log("Could not persist canteen drinking deadlines");
+}
+
+void observeDrinkClock(int now) {
+    if (timing.observeClock(now,drinkInterval)) {
+        char line[120];
+        std::snprintf(line,sizeof(line),"canteen_clock_rebased cooldown_remaining=%d recovery_remaining=%d",
+                      timing.wait(now),std::max(0,timing.soberAt-now));
+        log(line);
+    }
 }
 
 void updateDrinking(int now) {
     if (!legacyClean && clearOldAbilities) legacyClean=run(clearOldAbilities)==1;
     if (!getDeadline || !putDeadlines) return;
     if (!timingLoaded) {
-        int values[2]{};
-        for (int slot=0;slot<2;++slot) {
+        int values[3]{};
+        for (int slot=0;slot<3;++slot) {
             Result r;
             if (!scripts->call(getDeadline,nullptr,nullptr,&r,1,slot) || r.type!=1 ||
                 !(r.value>=0 && r.value<=std::numeric_limits<int>::max())) return;
             values[slot]=static_cast<int>(r.value);
         }
-        timing={values[0],values[1]};
+        timing={values[0],values[1],values[2]};
         timingLoaded=true;
         if (!drinkingEnabled && (timing.saveReady || timing.soberAt)) {
             timing={};
             storeTiming();
         }
     }
+    if (drinkingEnabled) observeDrinkClock(now);
     targetStrength=drinkingEnabled ? timing.intensity(now,drinkInterval) : 0.f;
 }
 
-void applyBlur(int amount) {
-    Result r;
-    if (setBlur && scripts->call(setBlur,nullptr,nullptr,&r,1,amount) && r.type==1 && r.value==1)
-        lastBlur=amount;
+void updateModifier(ModifierState &state, int weight, ULONGLONG now) {
+    const bool clearingActive=weight==0 && state.lastWeight>0;
+    if (state.lastWeight==weight || (!clearingActive && now<state.nextUpdate)) return;
+    Result result;
+    if (setImageEffect && scripts->call(setImageEffect,nullptr,nullptr,&result,3,weight,
+                                        static_cast<int>(state.effect),int(state.lastWeight>0)) && result.type==1 && result.value==1) {
+        if (state.effect==ImageEffect::doubleVision && (state.lastWeight>0)!=(weight>0))
+            log(weight>0 ? "double_vision native_modifier=on" : "double_vision native_modifier=off");
+        state.lastWeight=weight;
+        state.nextUpdate=now+(state.effect==ImageEffect::doubleVision ? 33 : 70);
+    } else {
+        state.lastWeight=-1;
+        state.nextUpdate=now+1000;
+    }
 }
 
 void updateMotion(ULONGLONG now) {
     float step=lastMotion ? std::min(now-lastMotion,100ULL)*.0004f : 0.f;
     lastMotion=now;
-    shownStrength+=std::clamp(targetStrength-shownStrength,-step,step);
+    float strength=std::max(targetStrength,alcoholStrength);
+    shownStrength+=std::clamp(strength-shownStrength,-step,step);
     if (shownStrength>0 && now>=nextMode) {
         nextMode=now+60;
         playMode=motionMode ? run(motionMode) : 0;
@@ -284,10 +370,8 @@ void updateMotion(ULONGLONG now) {
         reportedViews=applied;
     }
     int amount=static_cast<int>(std::lround(64.f*playing));
-    if (amount!=lastBlur && now>=nextBlur) {
-        applyBlur(amount);
-        nextBlur=now+(amount==lastBlur ? 70 : 1000);
-    }
+    updateModifier(blur,amount,now);
+    updateModifier(ghost,canteen::doubleVisionAmount(playing,doubleVision,now),now);
 }
 
 void presentBody(ULONGLONG now) {
@@ -374,15 +458,22 @@ void tick() {
         initialized=true;
         gameThread=GetCurrentThreadId();
         if (!GetModuleHandleW(L"TTWVR.dll")) { log("TTWVR is required"); return; }
-        syncItems=scripts->compile(inventory);
-        checkDrawn=scripts->compile(eligible);
-        putAway=scripts->compile(release);
+        auto *enabled=scripts->compile(enabledAddons);
+        int flags=enabled ? run(enabled) : -1;
+        if (flags<=0) return;
+        hasCanteen=(flags&1)!=0;
+        hasAlcohol=(flags&2)!=0;
+        if (hasCanteen) {
+            syncItems=scripts->compile(inventory);
+            checkDrawn=scripts->compile(eligible);
+            putAway=scripts->compile(release);
+            log(syncItems && checkDrawn && putAway ? "Physical Canteen 0.1.18 ready" : "Could not compile canteen scripts");
+        }
         initDrinking();
         char value[3]{};
         trace=GetEnvironmentVariableA("TTWVR_CANTEEN_TRACE",value,sizeof(value))==1 && value[0]=='1';
-        log(syncItems && checkDrawn && putAway ? "Physical Canteen 0.1.13 ready" : "Could not compile canteen scripts");
     }
-    if (!syncItems || !checkDrawn || !putAway) return;
+    if (!hasCanteen && !hasAlcohol) return;
     if (gulp) {
         gulp=false;
         if (!console->line("PlaySound NPCHumanDrinkingBottleGulp",nullptr)) log("Bottle gulp unavailable");
@@ -390,10 +481,24 @@ void tick() {
     auto now=GetTickCount64();
     if (now>=nextDrinkUpdate) {
         nextDrinkUpdate=now+1000;
-        updateDrinking(drinkClock());
+        if (hasCanteen) updateDrinking(drinkClock());
+        if (clearPreviousImages && !imagesClean) imagesClean=run(clearPreviousImages)==1;
+        if (readAlcohol) {
+            Result result;
+            if (scripts->call(readAlcohol,nullptr,nullptr,&result,0) && result.type==1) {
+                const float current=static_cast<float>(std::clamp(result.value,0.0,1.0));
+                if (current>alcoholStrength+.05f) {
+                    char line[64];
+                    std::snprintf(line,sizeof(line),"regular_alcohol intensity=%.3f",current);
+                    log(line);
+                }
+                alcoholStrength=current;
+            }
+        }
     }
     updateMotion(now);
     if (!lastPresentation || now-lastPresentation>100) presentBody(now);
+    if (!syncItems || !checkDrawn || !putAway) return;
     if (requested[0] && now-requestedAt>5000) { requested[0]=0; log("No save confirmation"); }
     // Runtimes that bypass the regular render event still get placement every
     // game frame, including the equipped-but-not-yet-drawn part of a draw.
@@ -442,6 +547,7 @@ void tick() {
     }
     if (!sip.sample(now,m.distance,m.up) || requested[0]) return;
     const int at=drinkClock();
+    if (drinkingEnabled && timingLoaded) observeDrinkClock(at);
     const int remaining=drinkingEnabled && timingLoaded ? timing.wait(at) : 0;
     if (remaining>0) {
         countDrink(at,false);
@@ -457,13 +563,17 @@ void __cdecl message(Message *m) {
             messages->listen(pluginHandle,"JohnnyGuitarNVSE",renderMessage); break;
         case 1: case 2: case 6: case 7: case 8: case 14:
             if (loaded && (m->type==2 || m->type==6) && GetCurrentThreadId()==gameThread) {
-                if (lastBlur>0) applyBlur(0);
+                const auto now=GetTickCount64();
+                updateModifier(blur,0,now);
+                updateModifier(ghost,0,now);
                 playMode=0;
                 if (presentedLean) presentBody(GetTickCount64());
             }
             canteen::publishMotion(0,false,false);
-            targetStrength=shownStrength=0; lastBlur=-1; playMode=0; legacyClean=presentedLean=false;
-            lastMotion=nextMode=lastPresentation=nextBlur=0;
+            blur={ImageEffect::blur}; ghost={ImageEffect::doubleVision};
+            targetStrength=alcoholStrength=shownStrength=0; playMode=0;
+            legacyClean=imagesClean=presentedLean=false;
+            lastMotion=nextMode=lastPresentation=0;
             loaded=m->type==14 || (m->type==8 && m->data);
             timing={}; timingLoaded=false; nextDrinkUpdate=0;
             canteenForm=nullptr; lastRenderFit=0; sawRenderFit=false;
@@ -475,6 +585,10 @@ void __cdecl message(Message *m) {
                 // NVSE dispatches this before JIP writes the co-save. Only a
                 // matching save can start a new cooldown.
                 if (drinkingEnabled && timingLoaded) countDrink(drinkClock(),true);
+            } else if (loaded && drinkingEnabled && timingLoaded && (timing.saveReady || timing.soberAt)) {
+                // Stamp ordinary saves too, including ones made after recovery.
+                observeDrinkClock(drinkClock());
+                storeTiming();
             }
             break;
         case 20: tick(); break;
@@ -483,7 +597,7 @@ void __cdecl message(Message *m) {
 }
 extern "C" __declspec(dllexport) bool NVSEPlugin_Query(const NVSE *n, Info *p) {
     if (!n || !p) return false;
-    *p={1,"TTWVR Physical Canteen",14};
+    *p={1,"TTWVR Physical Canteen",19};
     return !n->isEditor && n->runtime==0x040020d0 && n->version>=6;
 }
 extern "C" __declspec(dllexport) bool NVSEPlugin_Load(const NVSE *n) {

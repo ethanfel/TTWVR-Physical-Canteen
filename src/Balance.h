@@ -39,10 +39,10 @@ inline Rock rocking(double seconds,float strength) {
     float u=std::clamp((strength-.35f)/.65f,0.f,1.f);
     float balance=u*u*(3.f-2.f*u);
     float wave=static_cast<float>(.8*std::sin(seconds*.89)+.2*std::sin(seconds*1.31+.6));
-    constexpr float maxViewRoll=3.f*3.14159265f/180.f;
+    constexpr float maxViewRoll=10.f*3.14159265f/180.f;
     return {float(.030*strength*(.72*std::sin(seconds*1.43)+.28*std::sin(seconds*.81))),
             float(.018*strength*std::sin(seconds*1.09+.8)),
-            .046f*balance*wave, maxViewRoll*strength*(.4f+.6f*strength)*wave};
+            .046f*balance*wave, maxViewRoll*strength*strength*wave};
 }
 
 struct TrackedPose { Point position; Quaternion orientation; unsigned char valid,tracked,pad[2]; };

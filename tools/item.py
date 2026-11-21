@@ -21,19 +21,26 @@ def group(tag, data):
     return pack("<4sI4sIII", b"GRUP", 24 + len(data), tag, 0, 0, 0) + data
 
 
-def drinking_blur():
-    # Non-animated FNV IMAD. Keep the standard two equal keys per channel.
+def image_modifier(form_id, editor_id, *, blur=0, refocus=False):
+    # Non-animated FNV IMAD. Static channels use two equal keys.
     # Multiplicative channels are identity and additive channels are zero.
     counts = [2] * 61
     for idx in (0, 1, 50, 51, 52, 56):
         counts[idx] = 0
+    if refocus:
+        # JIP updates the live value and first key for trait 46. One key
+        # keeps the running modifier at that value until the next update.
+        counts[46] = 1
     data = bytearray(pack("<61I", *counts))
     pack_into("<2f", data, 51 * 4, 0.5, 0.5)
-    fields = [(b"EDID", string("TTWVRCanteenBlur")), (b"DNAM", data)]
+    fields = [(b"EDID", string(editor_id)), (b"DNAM", data)]
     def curve(tag, value):
         fields.append((tag, pack("<4f", 0, value, 1, value)))
-    curve(b"BNAM", 2.4)
-    curve(b"VNAM", 0)
+    curve(b"BNAM", blur)
+    if refocus:
+        fields.append((b"VNAM", pack("<2f", 0, 0)))
+    else:
+        curve(b"VNAM", 0)
     for tag in (b"TNAM", b"NAM3"):
         fields.append((tag, pack("<10f", 0, 0, 0, 0, 0, 1, 0, 0, 0, 0)))
     for tag in (b"RNAM", b"SNAM", b"UNAM", b"NAM1", b"NAM2", b"WNAM", b"XNAM", b"YNAM", b"NAM4"):
@@ -41,12 +48,12 @@ def drinking_blur():
     for channel in range(21):
         curve(bytes([channel]) + b"IAD", 1)
         curve(bytes([channel + 64]) + b"IAD", 0)
-    return record(b"IMAD", 0x01000805, fields)
+    return record(b"IMAD", form_id, fields)
 
 
 def build():
     header = record(b"TES4", 0, [
-        (b"HEDR", pack("<fII", 1.34, 10, 0x806)), (b"CNAM", string("TTWVR Physical Canteen")),
+        (b"HEDR", pack("<fII", 1.34, 11, 0x807)), (b"CNAM", string("TTWVR Physical Canteen")),
         (b"MAST", string("FalloutNV.esm")), (b"DATA", bytes(8)),
     ])
     bounds = pack("<6h", -7, -2, 0, 7, 3, 14)
@@ -81,8 +88,10 @@ def build():
             fields.extend(((b"EFID", pack("<I", effect)),
                            (b"EFIT", pack("<5I", magnitude, 0, 0, 0, actor_value))))
         abilities.append(record(b"SPEL", FIRST_PERSON + level, fields))
+    blur = image_modifier(0x01000805, "TTWVRCanteenBlur", blur=2.4)
+    double_vision = image_modifier(0x01000806, "TTWVRCanteenDoubleVision", refocus=True)
     return (header + group(b"SPEL", b"".join(abilities)) + group(b"STAT", model)
-            + group(b"WEAP", tool) + group(b"IMAD", drinking_blur()))
+            + group(b"WEAP", tool) + group(b"IMAD", blur + double_vision))
 
 
 if __name__ == "__main__":
