@@ -6,8 +6,8 @@ NAME := TTWVRPhysicalCanteen
 all: build/$(NAME).dll build/$(NAME).esp
 build:
 	mkdir -p $@
-build/$(NAME).dll: src/Plugin.cpp src/Scene.h src/Holster.h src/Grip.h src/Sip.h src/DrinkTiming.h | build
-	$(WINCXX) $(FLAGS) -static -shared -s $< -o $@
+build/$(NAME).dll: src/Plugin.cpp src/Tracking.cpp src/Balance.h src/Torso.h src/Scene.h src/Holster.h src/Grip.h src/Sip.h src/DrinkTiming.h | build
+	$(WINCXX) $(FLAGS) -static -shared -s src/Plugin.cpp src/Tracking.cpp -o $@
 build/$(NAME).esp: tools/item.py | build
 	python3 $< $@
 build/test-sip: tests/Sip.cpp src/Sip.h | build
@@ -20,7 +20,10 @@ build/test-draw: tests/Draw.cpp src/Scene.h src/Grip.h src/Sip.h | build
 	$(CXX) $(FLAGS) $< -o $@
 build/test-drink-timing: tests/DrinkTiming.cpp src/DrinkTiming.h | build
 	$(CXX) $(FLAGS) $< -o $@
-test: build/test-sip build/test-grip build/test-holster build/test-draw build/test-drink-timing
+build/test-balance: tests/Balance.cpp src/Balance.h src/Torso.h src/Scene.h src/Grip.h src/Sip.h | build
+	$(CXX) $(FLAGS) $< -o $@
+test: build/test-balance build/test-sip build/test-grip build/test-holster build/test-draw build/test-drink-timing
+	./build/test-balance
 	./build/test-drink-timing
 	python3 -B tests/test_drink_records.py
 	./build/test-sip

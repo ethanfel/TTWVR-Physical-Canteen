@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-only
-"""Build the physical canteen and its temporary beer-style abilities."""
+"""Build the physical canteen and its drinking blur and compatibility records."""
 from pathlib import Path
 from struct import pack, pack_into
 
@@ -21,9 +21,32 @@ def group(tag, data):
     return pack("<4sI4sIII", b"GRUP", 24 + len(data), tag, 0, 0, 0) + data
 
 
+def drinking_blur():
+    # Non-animated FNV IMAD. Keep the standard two equal keys per channel.
+    # Multiplicative channels are identity and additive channels are zero.
+    counts = [2] * 61
+    for idx in (0, 1, 50, 51, 52, 56):
+        counts[idx] = 0
+    data = bytearray(pack("<61I", *counts))
+    pack_into("<2f", data, 51 * 4, 0.5, 0.5)
+    fields = [(b"EDID", string("TTWVRCanteenBlur")), (b"DNAM", data)]
+    def curve(tag, value):
+        fields.append((tag, pack("<4f", 0, value, 1, value)))
+    curve(b"BNAM", 2.4)
+    curve(b"VNAM", 0)
+    for tag in (b"TNAM", b"NAM3"):
+        fields.append((tag, pack("<10f", 0, 0, 0, 0, 0, 1, 0, 0, 0, 0)))
+    for tag in (b"RNAM", b"SNAM", b"UNAM", b"NAM1", b"NAM2", b"WNAM", b"XNAM", b"YNAM", b"NAM4"):
+        curve(tag, 0)
+    for channel in range(21):
+        curve(bytes([channel]) + b"IAD", 1)
+        curve(bytes([channel + 64]) + b"IAD", 0)
+    return record(b"IMAD", 0x01000805, fields)
+
+
 def build():
     header = record(b"TES4", 0, [
-        (b"HEDR", pack("<fII", 1.34, 8, 0x805)), (b"CNAM", string("TTWVR Physical Canteen")),
+        (b"HEDR", pack("<fII", 1.34, 10, 0x806)), (b"CNAM", string("TTWVR Physical Canteen")),
         (b"MAST", string("FalloutNV.esm")), (b"DATA", bytes(8)),
     ])
     bounds = pack("<6h", -7, -2, 0, 7, 3, 14)
@@ -46,8 +69,8 @@ def build():
         (b"WNAM", pack("<I", FIRST_PERSON)), (b"DATA", pack("<IIfHB", 0, 100, 0.0, 0, 0)),
         (b"DNAM", tuning), (b"CRDT", bytes(16)), (b"VNAM", pack("<I", 2)),
     ], flags=0x400)  # Quest item: the zero-weight representation stays with the original.
-    # Use the three SPECIAL effects from FalloutNV.esm's Beer (00015197).
-    # Ability duration is controlled by the canteen's recovery timer.
+    # Keep the original ability IDs and effect lists so removing a 0.1.10
+    # ability on load can unwind its existing active effects. Never grant these.
     abilities = []
     for level, label in enumerate(("Tipsy", "Drunk", "Very Drunk"), start=1):
         fields = [(b"EDID", string(f"TTWVRCanteenBuzz{level}")),
@@ -58,7 +81,8 @@ def build():
             fields.extend(((b"EFID", pack("<I", effect)),
                            (b"EFIT", pack("<5I", magnitude, 0, 0, 0, actor_value))))
         abilities.append(record(b"SPEL", FIRST_PERSON + level, fields))
-    return header + group(b"SPEL", b"".join(abilities)) + group(b"STAT", model) + group(b"WEAP", tool)
+    return (header + group(b"SPEL", b"".join(abilities)) + group(b"STAT", model)
+            + group(b"WEAP", tool) + group(b"IMAD", drinking_blur()))
 
 
 if __name__ == "__main__":

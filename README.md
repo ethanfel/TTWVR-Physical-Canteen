@@ -22,4 +22,4 @@ Enabled=1
 CooldownMinutes=5
 ```
 
-The first sip while sober has no penalty. Extra sips during the cooldown build drunkenness. Your next save still unlocks on time.
+The first sip while sober has no penalty. Extra sips gradually blur your vision and make gun sights drift. At stronger levels your avatar sways at the waist. The headset view follows your head throughout. Your next save still unlocks on time.

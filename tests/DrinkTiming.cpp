@@ -14,13 +14,17 @@ int main() {
     assert(t.wait(start) == 0 && t.effect(start, interval) == 0);
     t.drink(start, interval, true);
     assert(t.wait(start) == 300 && t.effect(start, interval) == 0);
+    assert(t.intensity(start, interval) == 0.f);
     t.drink(start+10, interval, false);
+    assert(t.intensity(start+10,interval) > .30f && t.intensity(start+10,interval) < .34f);
+    assert(t.intensity(start+120,interval) < t.intensity(start+10,interval));
     assert(t.wait(start+10) == 290 && t.effect(start+10, interval) == 1);
     t.drink(start+20, interval, false);
     t.drink(start+30, interval, false);
     t.drink(start+40, interval, false);
     assert(t.wait(start+299) == 1 && t.effect(start+299, interval) == 3);
     assert(t.wait(start+300) == 0 && t.effect(start+300, interval) == 3);
+    assert(t.intensity(start+40,interval)==1.f && t.intensity(start+1200,interval)==0.f);
     const DrinkTiming restored{t.saveReady, t.soberAt};
     assert(restored.effect(start+600, interval) == 2);
     assert(restored.effect(start+900, interval) == 1);

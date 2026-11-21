@@ -29,6 +29,11 @@ struct DrinkTiming {
         return std::min(3, (soberAt - now - 1) / interval);
     }
 
+    float intensity(int now, int interval) const {
+        const double extra = (static_cast<double>(soberAt) - now) / interval - 1.0;
+        return static_cast<float>(std::clamp(extra / 3.0, 0.0, 1.0));
+    }
+
     void drink(int now, int interval, bool saved) {
         const auto later = [interval](int start) {
             return static_cast<int>(std::min<long long>(

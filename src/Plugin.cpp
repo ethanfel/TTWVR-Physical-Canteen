@@ -7,6 +7,12 @@
 #include "Scene.h"
 #include "Holster.h"
 #include "DrinkTiming.h"
+#include "Torso.h"
+
+namespace canteen {
+unsigned installDrift();
+void publishMotion(float amount,bool firearm);
+}
 
 namespace {
 struct NVSE {
@@ -42,9 +48,13 @@ ULONGLONG wristAfter = 0;
 bool loaded=false, initialized=false, trace=false, gulp=false;
 ULONGLONG nextInventory=0, nextPose=0, requestedAt=0;
 char requested[96]{};
-void *getDeadline, *putDeadlines, *setAbility;
+void *getDeadline, *putDeadlines, *clearOldAbilities, *setBlur, *motionMode;
+bool legacyClean=false, presentedLean=false, driftTried=false;
+float targetStrength=0, shownStrength=0;
+int lastBlur=-1, playMode=0;
+ULONGLONG lastMotion=0, nextMode=0, lastPresentation=0, nextBlur=0;
 bool drinkingEnabled=true, timingLoaded=false;
-int drinkInterval=canteen::defaultDrinkInterval, appliedStage=-1;
+int drinkInterval=canteen::defaultDrinkInterval;
 ULONGLONG nextDrinkUpdate=0;
 canteen::DrinkTiming timing;
 canteen::Sip sip;
@@ -122,26 +132,55 @@ begin Function {readyAt soberAt}
   SetFunctionValue (player.AuxVarSetFlt "_TTWVRPhysicalCanteenDeadlines" soberAt 1)
  endif
 end)";
-constexpr char setBeerAbility[] = R"(int which
-int wanted
-ref ability
-begin Function {which wanted}
- if which == 1
-  let ability := GetFormFromMod "TTWVRPhysicalCanteen.esp" "802"
- elseif which == 2
-  let ability := GetFormFromMod "TTWVRPhysicalCanteen.esp" "803"
- else
-  let ability := GetFormFromMod "TTWVRPhysicalCanteen.esp" "804"
+// 0.1.10 serialized its active abilities into the base save. Remove only our
+// three private forms, even on a save loaded with drinking disabled.
+constexpr char removeBeer[] = R"(begin Function {}
+ ref ability
+ let ability := GetFormFromMod "TTWVRPhysicalCanteen.esp" "802"
+ if eval ability
+  player.RemoveSpell ability
  endif
- if eval !ability
+ let ability := GetFormFromMod "TTWVRPhysicalCanteen.esp" "803"
+ if eval ability
+  player.RemoveSpell ability
+ endif
+ let ability := GetFormFromMod "TTWVRPhysicalCanteen.esp" "804"
+ if eval ability
+  player.RemoveSpell ability
+ endif
+ SetFunctionValue 1
+end)";
+constexpr char blurScript[] = R"(int amount
+ref modifier
+float weight
+begin Function {amount}
+ let modifier := GetFormFromMod "TTWVRPhysicalCanteen.esp" "805"
+ if eval !modifier
   return
  endif
- if which == wanted
-  if eval !(player.IsSpellTargetAlt ability)
-   player.AddSpell ability
+ RemoveImageSpaceModifier modifier
+ if amount > 0
+  let weight := amount / 64.0
+  ApplyImageSpaceModifier modifier weight
+ endif
+ SetFunctionValue 1
+end)";
+constexpr char checkMotionMode[] = R"(begin Function {}
+ int menu
+ int kind
+ ref gun
+ let menu := GetActiveMenuMode
+ if eval (menu != 0 && menu != 1004) || player.GetDead
+  SetFunctionValue 0
+  return
+ endif
+ let gun := player.GetEquippedWeapon
+ if eval gun && player.IsWeaponOut
+  let kind := GetWeaponType gun
+  if eval kind >= 3 && kind <= 9
+   SetFunctionValue 2
+   return
   endif
- elseif player.IsSpellTargetAlt ability
-  player.RemoveSpell ability
  endif
  SetFunctionValue 1
 end)";
@@ -158,8 +197,11 @@ void initDrinking() {
     }
     getDeadline=scripts->compile(readDeadline);
     putDeadlines=scripts->compile(writeDeadlines);
-    setAbility=scripts->compile(setBeerAbility);
-    if (!getDeadline || !putDeadlines || !setAbility) {
+    clearOldAbilities=scripts->compile(removeBeer);
+    setBlur=scripts->compile(blurScript);
+    motionMode=scripts->compile(checkMotionMode);
+    if (!clearOldAbilities || !setBlur || !motionMode) log("Could not compile all canteen effect scripts");
+    if (!getDeadline || !putDeadlines) {
         drinkingEnabled=false;
         log("Could not compile drinking scripts; using ordinary canteen saves");
         return;
@@ -189,7 +231,8 @@ void storeTiming() {
 }
 
 void updateDrinking(int now) {
-    if (!getDeadline || !putDeadlines || !setAbility) return;
+    if (!legacyClean && clearOldAbilities) legacyClean=run(clearOldAbilities)==1;
+    if (!getDeadline || !putDeadlines) return;
     if (!timingLoaded) {
         int values[2]{};
         for (int slot=0;slot<2;++slot) {
@@ -205,16 +248,44 @@ void updateDrinking(int now) {
             storeTiming();
         }
     }
-    const int wanted=drinkingEnabled ? timing.effect(now,drinkInterval) : 0;
-    if (wanted==appliedStage) return;
-    // Reconcile all three on load. The base save can contain the previous
-    // effect because Fallout writes it before the named save notification.
-    for (int which=1;which<=3;++which) {
-        Result r;
-        if (!scripts->call(setAbility,nullptr,nullptr,&r,2,which,wanted) ||
-            r.type!=1 || r.value!=1) return;
+    targetStrength=drinkingEnabled ? timing.intensity(now,drinkInterval) : 0.f;
+}
+
+void applyBlur(int amount) {
+    Result r;
+    if (setBlur && scripts->call(setBlur,nullptr,nullptr,&r,1,amount) && r.type==1 && r.value==1)
+        lastBlur=amount;
+}
+
+void updateMotion(ULONGLONG now) {
+    float step=lastMotion ? std::min(now-lastMotion,100ULL)*.0004f : 0.f;
+    lastMotion=now;
+    shownStrength+=std::clamp(targetStrength-shownStrength,-step,step);
+    if (shownStrength>0 && now>=nextMode) {
+        nextMode=now+60;
+        playMode=motionMode ? run(motionMode) : 0;
+        if (!driftTried) {
+            driftTried=true;
+            unsigned backends=canteen::installDrift();
+            char line[80]; std::snprintf(line,sizeof(line),"drunk_aim openxr=%u openvr=%u",backends&1,(backends>>1)&1);
+            log(line);
+        }
     }
-    appliedStage=wanted;
+    if (shownStrength==0) playMode=0;
+    float playing=playMode>0 ? shownStrength : 0.f;
+    canteen::publishMotion(playing,playMode==2);
+    int amount=static_cast<int>(std::lround(64.f*playing));
+    if (amount!=lastBlur && now>=nextBlur) {
+        applyBlur(amount);
+        nextBlur=now+(amount==lastBlur ? 70 : 1000);
+    }
+}
+
+void presentBody(ULONGLONG now) {
+    float lean=playMode>0 ? canteen::rocking(now*.001,shownStrength).lean : 0.f;
+    if (!lean && !presentedLean) return;
+    auto *player=*reinterpret_cast<char **>(0x11dea3c);
+    presentedLean=canteen::presentLean(canteen::worldRoot(player),lean) && lean!=0.f;
 }
 
 void countDrink(int now, bool saved) {
@@ -280,6 +351,8 @@ void reportGrip(const canteen::Measurement &m, ULONGLONG now) {
 void __cdecl renderMessage(Message *m) {
     constexpr unsigned renderGameMode = 10014;
     if (m->type!=renderGameMode || GetCurrentThreadId()!=gameThread || !loaded) return;
+    lastPresentation=GetTickCount64();
+    presentBody(lastPresentation);
     if (canteenForm && canteen::prepareDraw(canteenForm)) {
         lastRenderFit=GetTickCount64();
         sawRenderFit=true;
@@ -298,7 +371,7 @@ void tick() {
         initDrinking();
         char value[3]{};
         trace=GetEnvironmentVariableA("TTWVR_CANTEEN_TRACE",value,sizeof(value))==1 && value[0]=='1';
-        log(syncItems && checkDrawn && putAway ? "Physical Canteen 0.1.10 ready" : "Could not compile canteen scripts");
+        log(syncItems && checkDrawn && putAway ? "Physical Canteen 0.1.11 ready" : "Could not compile canteen scripts");
     }
     if (!syncItems || !checkDrawn || !putAway) return;
     if (gulp) {
@@ -310,6 +383,8 @@ void tick() {
         nextDrinkUpdate=now+1000;
         updateDrinking(drinkClock());
     }
+    updateMotion(now);
+    if (!lastPresentation || now-lastPresentation>100) presentBody(now);
     if (requested[0] && now-requestedAt>5000) { requested[0]=0; log("No save confirmation"); }
     // Runtimes that bypass the regular render event still get placement every
     // game frame, including the equipped-but-not-yet-drawn part of a draw.
@@ -372,8 +447,16 @@ void __cdecl message(Message *m) {
         case 0: // All NVSE plugins have loaded.
             messages->listen(pluginHandle,"JohnnyGuitarNVSE",renderMessage); break;
         case 1: case 2: case 6: case 7: case 8: case 14:
+            if (loaded && (m->type==2 || m->type==6) && GetCurrentThreadId()==gameThread) {
+                if (lastBlur>0) applyBlur(0);
+                playMode=0;
+                if (presentedLean) presentBody(GetTickCount64());
+            }
+            canteen::publishMotion(0,false);
+            targetStrength=shownStrength=0; lastBlur=-1; playMode=0; legacyClean=presentedLean=false;
+            lastMotion=nextMode=lastPresentation=nextBlur=0;
             loaded=m->type==14 || (m->type==8 && m->data);
-            timing={}; timingLoaded=false; appliedStage=-1; nextDrinkUpdate=0;
+            timing={}; timingLoaded=false; nextDrinkUpdate=0;
             canteenForm=nullptr; lastRenderFit=0; sawRenderFit=false;
             holster={}; previousState=State::unavailable; wristAfter=0;
             drawnHand=-1; nextInventory=nextPose=0; requested[0]=0; gulp=false; sip.reset(); break;
@@ -391,7 +474,7 @@ void __cdecl message(Message *m) {
 }
 extern "C" __declspec(dllexport) bool NVSEPlugin_Query(const NVSE *n, Info *p) {
     if (!n || !p) return false;
-    *p={1,"TTWVR Physical Canteen",11};
+    *p={1,"TTWVR Physical Canteen",12};
     return !n->isEditor && n->runtime==0x040020d0 && n->version>=6;
 }
 extern "C" __declspec(dllexport) bool NVSEPlugin_Load(const NVSE *n) {
