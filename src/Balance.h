@@ -60,9 +60,7 @@ inline bool validPose(const TrackedPose &p) {
     return p.valid && std::isfinite(dot(p.position,p.position)) &&
            std::abs(q.x*q.x+q.y*q.y+q.z*q.z+q.w*q.w-1.f)<.05f;
 }
-// TTWVR builds its game cameras from this copy of the backend's tracking sample.
-// Use one rigid motion about the neck for the center and both eyes, including
-// their separation and any canted eye orientations. The runtime owns its raw poses.
+// Legacy OpenVR uses the host-side camera sample.
 inline bool swayView(TrackingFrame &frame,float roll) {
     if (roll==0.f || !frame.valid || !validPose(frame.head) ||
         !validPose(frame.eyes[0].pose) || !validPose(frame.eyes[1].pose)) return false;

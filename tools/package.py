@@ -11,7 +11,7 @@ source = os.environ.get("TTWVR_DATA")
 if not source:
     raise SystemExit("Set TTWVR_DATA to the installed TTWVR 1.1.7 TTWVR.dat to build the release ZIP.")
 native = with_canteen_grip(Path(source).read_bytes(), (root / "assets/canteen-grip.txt").read_bytes())
-with ZipFile(build / "TTWVR-Physical-Canteen-0.1.12.zip", "w", ZIP_DEFLATED) as archive:
+with ZipFile(build / "TTWVR-Physical-Canteen-0.1.13.zip", "w", ZIP_DEFLATED) as archive:
     archive.write(build / f"{name}.esp", f"{name}.esp")
     archive.write(build / f"{name}.dll", f"NVSE/Plugins/{name}.dll")
     archive.write(root / f"assets/{name}.ini", f"NVSE/Plugins/{name}.ini")

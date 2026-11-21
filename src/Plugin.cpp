@@ -279,8 +279,8 @@ void updateMotion(ULONGLONG now) {
     static unsigned reportedViews=0;
     const unsigned applied=canteen::appliedViewBackends();
     if (applied!=reportedViews) {
-        if ((applied&1) && !(reportedViews&1)) log("view_sway backend=OpenXR eyes=2 applied=1");
-        if ((applied&2) && !(reportedViews&2)) log("view_sway backend=OpenVR eyes=2 applied=1");
+        if ((applied&1) && !(reportedViews&1)) log("view_sway backend=OpenXR stage=xrEndFrame eyes=2 result=XR_SUCCESS");
+        if ((applied&2) && !(reportedViews&2)) log("view_sway backend=OpenVR stage=tracking_sample eyes=2");
         reportedViews=applied;
     }
     int amount=static_cast<int>(std::lround(64.f*playing));
@@ -380,7 +380,7 @@ void tick() {
         initDrinking();
         char value[3]{};
         trace=GetEnvironmentVariableA("TTWVR_CANTEEN_TRACE",value,sizeof(value))==1 && value[0]=='1';
-        log(syncItems && checkDrawn && putAway ? "Physical Canteen 0.1.12 ready" : "Could not compile canteen scripts");
+        log(syncItems && checkDrawn && putAway ? "Physical Canteen 0.1.13 ready" : "Could not compile canteen scripts");
     }
     if (!syncItems || !checkDrawn || !putAway) return;
     if (gulp) {
@@ -483,7 +483,7 @@ void __cdecl message(Message *m) {
 }
 extern "C" __declspec(dllexport) bool NVSEPlugin_Query(const NVSE *n, Info *p) {
     if (!n || !p) return false;
-    *p={1,"TTWVR Physical Canteen",13};
+    *p={1,"TTWVR Physical Canteen",14};
     return !n->isEditor && n->runtime==0x040020d0 && n->version>=6;
 }
 extern "C" __declspec(dllexport) bool NVSEPlugin_Load(const NVSE *n) {

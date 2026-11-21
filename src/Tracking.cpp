@@ -4,12 +4,14 @@
 #include <windows.h>
 #include <atomic>
 #include <cstring>
-#include "Balance.h"
+#include "Projection.h"
 
 namespace canteen {
 // The same 1.1.7 controller-frame layout and verification used by the Night Vision addon.
 static std::atomic<unsigned> motion{0};
 static std::atomic<unsigned> viewApplied{0};
+static std::atomic<PFN_xrEndFrame> runtimeEndFrame{nullptr};
+static BYTE **loaderInstance=nullptr;
 unsigned appliedViewBackends() { return viewApplied.load(std::memory_order_relaxed); }
 void publishMotion(float amount,bool firearm,bool viewSway) {
     const unsigned amplitude=static_cast<unsigned>(std::lround(amount*4096));
@@ -18,6 +20,31 @@ void publishMotion(float amount,bool firearm,bool viewSway) {
 }
 
 using Poll = bool (__thiscall *)(void *,TrackingFrame *);
+static XrResult XRAPI_CALL endFrame(XrSession session,const XrFrameEndInfo *frame) {
+    const unsigned state=motion.load(std::memory_order_relaxed);
+    const float angle=(state&16384) ? rocking(GetTickCount64()*.001,(state&8191)/4096.f).viewRoll : 0.f;
+    bool applied=false;
+    auto result=submitView(runtimeEndFrame.load(),session,frame,angle,applied);
+    if (applied && std::abs(angle)>.004f && !(viewApplied.load(std::memory_order_relaxed)&1u))
+        viewApplied.fetch_or(1u,std::memory_order_relaxed);
+    return result;
+}
+
+// Called during a successful OpenXR poll with a live instance. TTWVR's
+// embedded loader reads this heap table even if a different addon wraps the
+// game's xrEndFrame call site. A recreated table can use the same downstream.
+static void bindViewSubmission() {
+    if (!loaderInstance || !*loaderInstance) return;
+    auto *table=*reinterpret_cast<BYTE **>(*loaderInstance+0x2c);
+    if (!table) return;
+    auto *slot=reinterpret_cast<void *volatile *>(table+0x8c);
+    auto current=reinterpret_cast<PFN_xrEndFrame>(*slot);
+    if (!current || current==endFrame) return;
+    PFN_xrEndFrame previous=nullptr;
+    if (!runtimeEndFrame.compare_exchange_strong(previous,current) && previous!=current) return;
+    InterlockedCompareExchangePointer(slot,reinterpret_cast<void *>(endFrame),reinterpret_cast<void *>(current));
+}
+
 template<int Backend> struct Filter {
     static inline Poll previous=nullptr;
     static bool __fastcall poll(void *self,void *,TrackingFrame *f) {
@@ -26,7 +53,9 @@ template<int Backend> struct Filter {
         if (ok && f && state) {
             const Rock rock=rocking(GetTickCount64()*.001,(state&8191)/4096.f);
             driftHands(*f,rock,state&8192);
-            if ((state&16384) && swayView(*f,rock.viewRoll) && std::abs(rock.viewRoll)>.004f) {
+            if constexpr (Backend==0) {
+                if (state&16384) bindViewSubmission();
+            } else if ((state&16384) && swayView(*f,rock.viewRoll) && std::abs(rock.viewRoll)>.004f) {
                 constexpr unsigned backendBit=1u<<Backend;
                 if (!(viewApplied.load(std::memory_order_relaxed)&backendBit))
                     viewApplied.fetch_or(backendBit,std::memory_order_relaxed);
@@ -59,6 +88,12 @@ unsigned installDrift() {
     const BYTE xr[]{0x88,0x47,0x25,0x8d,0x4c,0x24,0x28}, vr[]{0x88,0x41,0x20,0x8d,0x4c,0x24};
     if (nt->FileHeader.TimeDateStamp!=0x6afa9b4f || nt->OptionalHeader.SizeOfImage!=0x1d84000 ||
         std::memcmp(host+0x6e986d,xr,sizeof(xr)) || std::memcmp(host+0x6c8954,vr,sizeof(vr))) return 0;
+    const BYTE dispatch[]{0x8b,0x40,0x2c,0xff,0x75,0x08,0x8b,0x80,0x8c,0,0,0,0xff,0xd0};
+    BYTE *instanceAddress=nullptr;
+    std::memcpy(&instanceAddress,host+0x7420cd,sizeof(instanceAddress));
+    if (host[0x7420cc]==0xb8 && host[0x7420d1]==0xc3 && instanceAddress==host+0x1d24c68 &&
+        !std::memcmp(host+0x72edb8,dispatch,sizeof(dispatch)))
+        loaderInstance=reinterpret_cast<BYTE **>(instanceAddress);
     unsigned result=Filter<0>::install(host,0xaf3568) ? 1u : 0u;
     if (Filter<1>::install(host,0xaf36d0)) result|=2;
     return result;
