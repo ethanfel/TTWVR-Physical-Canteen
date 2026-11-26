@@ -10,6 +10,7 @@
 #include "Torso.h"
 
 namespace canteen {
+void prepareDrift();
 unsigned installDrift();
 void publishMotion(float amount,bool firearm,bool viewSway);
 unsigned appliedViewBackends();
@@ -467,8 +468,9 @@ void tick() {
             syncItems=scripts->compile(inventory);
             checkDrawn=scripts->compile(eligible);
             putAway=scripts->compile(release);
-            log(syncItems && checkDrawn && putAway ? "Physical Canteen 0.1.18 ready" : "Could not compile canteen scripts");
+            log(syncItems && checkDrawn && putAway ? "Physical Canteen 1.1.8-r1 ready" : "Could not compile canteen scripts");
         }
+        canteen::prepareDrift();
         initDrinking();
         char value[3]{};
         trace=GetEnvironmentVariableA("TTWVR_CANTEEN_TRACE",value,sizeof(value))==1 && value[0]=='1';
@@ -597,7 +599,7 @@ void __cdecl message(Message *m) {
 }
 extern "C" __declspec(dllexport) bool NVSEPlugin_Query(const NVSE *n, Info *p) {
     if (!n || !p) return false;
-    *p={1,"TTWVR Physical Canteen",19};
+    *p={1,"TTWVR Physical Canteen",1010801};
     return !n->isEditor && n->runtime==0x040020d0 && n->version>=6;
 }
 extern "C" __declspec(dllexport) bool NVSEPlugin_Load(const NVSE *n) {

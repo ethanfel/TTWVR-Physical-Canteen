@@ -5,9 +5,9 @@
 #include <atomic>
 #include <cstring>
 #include "Projection.h"
+#include "Host.h"
 
 namespace canteen {
-// The same 1.1.7 controller-frame layout and verification used by the Night Vision addon.
 static std::atomic<unsigned> motion{0};
 static std::atomic<unsigned> viewApplied{0};
 static std::atomic<PFN_xrEndFrame> runtimeEndFrame{nullptr};
@@ -63,8 +63,9 @@ template<int Backend> struct Filter {
         }
         return ok;
     }
-    static bool install(BYTE *host,unsigned table) {
-        void **slot=reinterpret_cast<void **>(host+table)+6;
+    static bool install(void **slot) {
+        if (!slot) return false;
+        if (previous) return true;
         void *next=*slot;
         MEMORY_BASIC_INFORMATION region{};
         if (!VirtualQuery(next,&region,sizeof(region)) || region.State!=MEM_COMMIT ||
@@ -76,26 +77,27 @@ template<int Backend> struct Filter {
         bool ok=InterlockedCompareExchangePointer(slot,reinterpret_cast<void *>(poll),next)==next;
         DWORD ignored;
         VirtualProtect(slot,sizeof(void *),protection,&ignored);
+        if (!ok) previous=nullptr;
         return ok;
     }
 };
 
+static void **xrPollSlot=nullptr, **vrPollSlot=nullptr;
+
+void prepareDrift() {
+    // Discover once during addon initialization. Install on first use so the
+    // initial sip never has to scan the image and later addons can wrap first.
+    HMODULE module=GetModuleHandleW(L"TTWVR.dll");
+    if (!module) return;
+    host::Image image(module);
+    loaderInstance=image.xrInstance();
+    xrPollSlot=image.pollSlot(".?AVOpenXRBackend@nvvr@@");
+    vrPollSlot=image.pollSlot(".?AVOpenVRBackend@nvvr@@");
+}
+
 unsigned installDrift() {
-    auto *host=reinterpret_cast<BYTE *>(GetModuleHandleW(L"TTWVR.dll"));
-    if (!host) return 0;
-    auto *dos=reinterpret_cast<IMAGE_DOS_HEADER *>(host);
-    auto *nt=reinterpret_cast<IMAGE_NT_HEADERS32 *>(host+dos->e_lfanew);
-    const BYTE xr[]{0x88,0x47,0x25,0x8d,0x4c,0x24,0x28}, vr[]{0x88,0x41,0x20,0x8d,0x4c,0x24};
-    if (nt->FileHeader.TimeDateStamp!=0x6afa9b4f || nt->OptionalHeader.SizeOfImage!=0x1d84000 ||
-        std::memcmp(host+0x6e986d,xr,sizeof(xr)) || std::memcmp(host+0x6c8954,vr,sizeof(vr))) return 0;
-    const BYTE dispatch[]{0x8b,0x40,0x2c,0xff,0x75,0x08,0x8b,0x80,0x8c,0,0,0,0xff,0xd0};
-    BYTE *instanceAddress=nullptr;
-    std::memcpy(&instanceAddress,host+0x7420cd,sizeof(instanceAddress));
-    if (host[0x7420cc]==0xb8 && host[0x7420d1]==0xc3 && instanceAddress==host+0x1d24c68 &&
-        !std::memcmp(host+0x72edb8,dispatch,sizeof(dispatch)))
-        loaderInstance=reinterpret_cast<BYTE **>(instanceAddress);
-    unsigned result=Filter<0>::install(host,0xaf3568) ? 1u : 0u;
-    if (Filter<1>::install(host,0xaf36d0)) result|=2;
+    unsigned result=Filter<0>::install(xrPollSlot) ? 1u : 0u;
+    if (Filter<1>::install(vrPollSlot)) result|=2;
     return result;
 }
 }

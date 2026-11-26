@@ -7,10 +7,12 @@ NAME := TTWVRPhysicalCanteen
 all: build/$(NAME).dll build/$(NAME).esp
 build:
 	mkdir -p $@
-build/$(NAME).dll: src/Plugin.cpp src/Tracking.cpp src/Projection.h src/Balance.h src/Torso.h src/Scene.h src/Holster.h src/Grip.h src/Sip.h src/DrinkTiming.h | build
+build/$(NAME).dll: src/Plugin.cpp src/Tracking.cpp src/Host.h src/Projection.h src/Balance.h src/Torso.h src/Scene.h src/Holster.h src/Grip.h src/Sip.h src/DrinkTiming.h | build
 	$(WINCXX) $(FLAGS) -I$(OPENXR_HEADERS) -static -shared -s src/Plugin.cpp src/Tracking.cpp -o $@
 build/$(NAME).esp: tools/item.py | build
 	python3 $< $@
+build/test-host.exe: tests/HostIntegration.cpp src/Tracking.cpp src/Host.h src/Projection.h src/Balance.h src/Grip.h src/Sip.h | build
+	$(WINCXX) $(FLAGS) -I$(OPENXR_HEADERS) -static -municode tests/HostIntegration.cpp src/Tracking.cpp -o $@
 build/test-sip: tests/Sip.cpp src/Sip.h | build
 	$(CXX) $(FLAGS) $< -o $@
 build/test-grip: tests/Grip.cpp src/Grip.h src/Sip.h | build

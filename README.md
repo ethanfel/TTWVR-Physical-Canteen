@@ -4,7 +4,11 @@ Drink from the Vault 13 canteen in VR to save your game.
 
 ## Install
 
-Requires Fallout: New Vegas with Classic Pack, TTWVR 1.1.7, xNVSE and JIP LN NVSE. Install the [release ZIP](https://github.com/ethanfel/TTWVR-Physical-Canteen/releases/latest) with your mod manager. Give the canteen priority over TTWVR for file conflicts, enable **TTWVRPhysicalCanteen.esp** and restart Fallout.
+1. Install TTWVR 1.1.8, xNVSE, JIP LN NVSE and the Classic Pack for Fallout: New Vegas.
+2. Install the [Physical Canteen release ZIP](https://github.com/ethanfel/TTWVR-Physical-Canteen/releases/latest) with your mod manager. Let Physical Canteen win file conflicts with TTWVR and with TTWVR Alcohol 0.1.0 if installed.
+3. Enable **TTWVRPhysicalCanteen.esp** and restart Fallout.
+
+In `1.1.8-r1`, `1.1.8` is the tested TTWVR version and `r1` is the canteen release number. The addon detects the tracking interfaces at startup. A future TTWVR update that changes its grip resource pack needs a matching canteen ZIP.
 
 ## Drink to save
 

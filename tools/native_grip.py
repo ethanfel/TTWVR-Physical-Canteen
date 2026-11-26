@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-only
-"""Add the canteen's measured hold to a local TTWVR 1.1.7 resource pack."""
+"""Add the canteen's measured hold to a local TTWVR resource pack."""
 import struct
 
 TABLE = b"grips-pose.txt"
